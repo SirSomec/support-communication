@@ -4,18 +4,29 @@ import { apiRequest, buildApiUrl, createApiErrorEnvelope } from "./apiClient.js"
 const SERVICE = "reportService";
 
 export const reportService = {
-  async fetchReportWorkspace(filters = {}) {
+  async fetchReportWorkspace(filters = {}, options = {}) {
     return apiRequest("/reports/workspace", {
       operation: "fetchReportWorkspace",
       query: filters,
+      signal: options.signal,
       service: SERVICE
     });
   },
 
-  async fetchRoutingActivityReport(filters = {}) {
+  async fetchRoutingActivityReport(filters = {}, options = {}) {
     return apiRequest("/reports/routing-activity", {
       operation: "fetchRoutingActivityReport",
       query: filters,
+      signal: options.signal,
+      service: SERVICE
+    });
+  },
+
+  async saveReportTemplate(payload = {}) {
+    return apiRequest("/reports/templates", {
+      body: payload,
+      method: "POST",
+      operation: "saveReportTemplate",
       service: SERVICE
     });
   },

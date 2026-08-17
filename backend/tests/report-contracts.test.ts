@@ -581,6 +581,153 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(crossTenantReplay.data.job.tenantId, "tenant-ladoga");
   });
 
+  it("honors metric export formats, validates custom windows and fingerprints format and dates", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [] }));
+    const reports = new ReportService(repository, {
+      now: () => new Date("2026-07-10T12:00:00.000Z")
+    });
+
+    for (const [requested, persisted] of [["csv", "CSV"], ["JSON", "JSON"], ["XLSX", "XLSX"]] as const) {
+      const response = await reports.requestReportExport({
+        columns: ["metric", "today"],
+        format: requested,
+        period: "today",
+        reportType: "operations"
+      }, { tenantId: "tenant-volga" });
+
+      assert.equal(response.status, "ok");
+      assert.equal(response.data.job.format, persisted);
+    }
+
+    const beforeInvalid = repository.listExportJobs().length;
+    const unsupported = await reports.requestReportExport({
+      columns: ["metric"],
+      format: "PDF",
+      period: "today",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(unsupported.status, "invalid");
+    assert.equal(unsupported.error?.code, "report_export_format_unsupported");
+    assert.equal(repository.listExportJobs().length, beforeInvalid);
+
+    const unsupportedPeriod = await reports.requestReportExport({
+      columns: ["metric"],
+      format: "CSV",
+      period: "quarter-to-date",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(unsupportedPeriod.status, "invalid");
+    assert.equal(unsupportedPeriod.error?.code, "report_export_period_invalid");
+
+    const fractionalTimezone = await reports.requestReportExport({
+      columns: ["metric"],
+      format: "CSV",
+      period: "today",
+      reportType: "operations",
+      timezoneOffsetMinutes: 180.5
+    }, { tenantId: "tenant-volga" });
+    assert.equal(fractionalTimezone.status, "invalid");
+    assert.equal(fractionalTimezone.error?.code, "report_export_period_invalid");
+
+    const invalidCustomWindow = await reports.requestReportExport({
+      columns: ["metric"],
+      format: "CSV",
+      period: "custom",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(invalidCustomWindow.status, "invalid");
+    assert.equal(invalidCustomWindow.error?.code, "report_export_period_invalid");
+
+    const custom = await reports.requestReportExport({
+      columns: ["metric", "today"],
+      filters: {
+        dateFrom: "2026-07-01",
+        dateTo: "2026-07-03",
+        timezoneOffsetMinutes: 180
+      },
+      format: "CSV",
+      idempotencyKey: "custom-report-fingerprint",
+      period: "custom",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(custom.status, "ok");
+    assert.equal(custom.data.job.format, "CSV");
+    assert.equal(custom.data.job.filters.dateFrom, "2026-07-01");
+    assert.equal(custom.data.job.filters.dateTo, "2026-07-03");
+    assert.equal(custom.data.job.filters.timezoneOffsetMinutes, 180);
+
+    const changedFormat = await reports.requestReportExport({
+      columns: ["metric", "today"],
+      filters: {
+        dateFrom: "2026-07-01",
+        dateTo: "2026-07-03",
+        timezoneOffsetMinutes: 180
+      },
+      format: "JSON",
+      idempotencyKey: "custom-report-fingerprint",
+      period: "custom",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(changedFormat.status, "conflict");
+    assert.equal(changedFormat.error?.code, "idempotency_key_reused");
+
+    const changedDates = await reports.requestReportExport({
+      columns: ["metric", "today"],
+      filters: {
+        dateFrom: "2026-07-02",
+        dateTo: "2026-07-03",
+        timezoneOffsetMinutes: 180
+      },
+      format: "CSV",
+      idempotencyKey: "custom-report-fingerprint",
+      period: "custom",
+      reportType: "operations"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(changedDates.status, "conflict");
+    assert.equal(changedDates.error?.code, "idempotency_key_reused");
+  });
+
+  it("fails closed with invalid envelopes for malformed export format, columns and idempotency input", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [] }));
+    const reports = new ReportService(repository);
+    const cases: Array<{
+      code: string;
+      payload: Parameters<ReportService["requestReportExport"]>[0];
+    }> = [
+      {
+        code: "report_export_format_unsupported",
+        payload: { columns: ["metric"], format: 42, period: "today", reportType: "operations" }
+      },
+      {
+        code: "report_columns_invalid",
+        payload: { columns: "metric", format: "CSV", period: "today", reportType: "operations" }
+      },
+      {
+        code: "report_columns_invalid",
+        payload: { columns: ["metric", 42], format: "CSV", period: "today", reportType: "operations" }
+      },
+      {
+        code: "report_columns_invalid",
+        payload: { columns: ["not-a-report-column"], format: "CSV", period: "today", reportType: "operations" }
+      },
+      {
+        code: "report_idempotency_key_invalid",
+        payload: { columns: ["metric"], format: "CSV", idempotencyKey: { key: "object" }, period: "today", reportType: "operations" }
+      },
+      {
+        code: "report_idempotency_key_invalid",
+        payload: { columns: ["metric"], format: "CSV", idempotencyKey: "   ", period: "today", reportType: "operations" }
+      }
+    ];
+
+    for (const item of cases) {
+      const response = await reports.requestReportExport(item.payload, { tenantId: "tenant-volga" });
+      assert.equal(response.status, "invalid");
+      assert.equal(response.error?.code, item.code);
+    }
+    assert.equal(repository.listExportJobs().length, 0);
+  });
+
   it("merges durable export writes from co-existing report service instances", async () => {
     const repository = ReportRepository.inMemory();
     const first = new ReportService(repository);

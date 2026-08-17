@@ -68,6 +68,32 @@ export function filterReportConversations(
   });
 }
 
+/**
+ * Routing analytics does not denormalize conversation dimensions. Resolve the
+ * value recorded by lifecycle at (or before) the routing event when available,
+ * then fall back to the persisted conversation facet. Resolution outcome is a
+ * cohort/final-outcome filter because it normally becomes known after routing.
+ */
+export function matchesRoutingConversationFiltersAt(
+  row: ConversationReportSourceRow,
+  filters: Pick<ConversationReportFilters, "queueId" | "resolutionOutcome" | "status" | "teamId" | "topic">,
+  occurredAt: string,
+  facetHistory: NonNullable<ConversationReportSourceRow["lifecycleEvents"]> = row.lifecycleEvents ?? []
+): boolean {
+  const normalized = normalizedFilters(filters);
+  const eventTime = Date.parse(occurredAt);
+  if (!Number.isFinite(eventTime)) return false;
+
+  for (const dimension of ["queueId", "status", "teamId", "topic"] as const) {
+    const requested = normalized[dimension];
+    if (!requested) continue;
+    if (routingFacetAt(row, dimension, eventTime, facetHistory) !== requested) return false;
+  }
+
+  const resolutionOutcome = normalized.resolutionOutcome;
+  return !resolutionOutcome || conversationReportFacets(row).resolutionOutcome.has(resolutionOutcome);
+}
+
 export function buildConversationReportFilterOptions(
   rows: readonly ConversationReportSourceRow[]
 ): ConversationReportFilterOptions {
@@ -120,6 +146,7 @@ function conversationReportFacets(row: ConversationReportSourceRow): Record<keyo
   const facets = emptyFacetRecord();
   add(facets.operatorId, row.operatorId);
   add(facets.queueId, row.queueId);
+  add(facets.resolutionOutcome, row.resolutionOutcome);
   add(facets.status, row.status);
   add(facets.teamId, row.teamId);
   add(facets.topic, row.topic);
@@ -135,6 +162,74 @@ function conversationReportFacets(row: ConversationReportSourceRow): Record<keyo
     add(facets.topic, event.data?.toTopic);
   }
   return facets;
+}
+
+function routingFacetAt(
+  row: ConversationReportSourceRow,
+  dimension: "queueId" | "status" | "teamId" | "topic",
+  eventTime: number,
+  facetHistory: NonNullable<ConversationReportSourceRow["lifecycleEvents"]>
+): string | undefined {
+  const events = facetHistory
+    .map((event) => ({ event, timestamp: Date.parse(event.occurredAt) }))
+    .filter((item) => Number.isFinite(item.timestamp));
+  const lifecycleValue = events
+    .filter((item) => item.timestamp <= eventTime)
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .map(({ event }) => routingFacetObservedValue(event.data, dimension))
+    .find((value): value is string => typeof value === "string" && value.trim() !== "");
+  if (lifecycleValue) return normalize(lifecycleValue);
+
+  // If the first recorded change happened after the routing event, its `from*`
+  // value is the state at the event. Do not fall back to the current persisted
+  // value across a post-event observation that lacks provenance: that would
+  // silently attribute the later queue/team/status/topic to historical work.
+  for (const { event } of events
+    .filter((item) => item.timestamp > eventTime)
+    .sort((left, right) => left.timestamp - right.timestamp)) {
+    const previousValue = routingFacetPreviousValue(event.data, dimension);
+    if (previousValue) return normalize(previousValue);
+    if (routingFacetObservedValue(event.data, dimension)) return undefined;
+  }
+
+  const persistedValue = dimension === "queueId"
+    ? row.queueId
+    : dimension === "status"
+      ? row.status
+      : dimension === "teamId"
+        ? row.teamId
+        : row.topic;
+  return normalize(persistedValue);
+}
+
+function routingFacetObservedValue(
+  data: Record<string, unknown> | undefined,
+  dimension: "queueId" | "status" | "teamId" | "topic"
+): string | undefined {
+  if (!data) return undefined;
+  const candidates = dimension === "queueId"
+    ? [data.toQueueId, data.queueId]
+    : dimension === "status"
+      ? [data.toStatus]
+      : dimension === "teamId"
+        ? [data.toTeamId, data.teamId]
+        : [data.toTopic, data.topic];
+  return candidates.find((value): value is string => typeof value === "string" && value.trim() !== "");
+}
+
+function routingFacetPreviousValue(
+  data: Record<string, unknown> | undefined,
+  dimension: "queueId" | "status" | "teamId" | "topic"
+): string | undefined {
+  if (!data) return undefined;
+  const candidates = dimension === "queueId"
+    ? [data.fromQueueId, data.previousQueueId]
+    : dimension === "status"
+      ? [data.fromStatus, data.previousStatus]
+      : dimension === "teamId"
+        ? [data.fromTeamId, data.previousTeamId]
+        : [data.fromTopic, data.previousTopic];
+  return candidates.find((value): value is string => typeof value === "string" && value.trim() !== "");
 }
 
 function emptyFacetRecord(): Record<keyof ConversationReportFilters, Set<string>> {

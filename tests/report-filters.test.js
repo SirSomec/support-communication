@@ -2,15 +2,83 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-describe("report filter UI contracts", () => {
-  it("loads server-provided dimensions and sends the same filters to workspace and export", () => {
-    const source = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
+const commandBarSource = readFileSync(new URL("../src/features/reports/components/ReportCommandBar.jsx", import.meta.url), "utf8");
+const filterDrawerSource = readFileSync(new URL("../src/features/reports/components/ReportFilterDrawer.jsx", import.meta.url), "utf8");
+const kpiOverviewSource = readFileSync(new URL("../src/features/reports/components/KpiOverview.jsx", import.meta.url), "utf8");
+const trendChartSource = readFileSync(new URL("../src/features/reports/components/AccessibleTrendChart.jsx", import.meta.url), "utf8");
+const workspaceHookSource = readFileSync(new URL("../src/features/reports/hooks/useReportWorkspace.js", import.meta.url), "utf8");
+const routingHookSource = readFileSync(new URL("../src/features/reports/hooks/useRoutingActivity.js", import.meta.url), "utf8");
+const reportsScreenSource = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
 
-    for (const dimension of ["operatorId", "outcome", "queueId", "resolutionOutcome", "status", "teamId", "topic"]) {
-      assert.match(source, new RegExp(`reportFilterOptions\\.${dimension}`));
+describe("report filter component contracts", () => {
+  it("keeps period, comparison, refresh, filters and export as accessible command-bar controls", () => {
+    assert.match(commandBarSource, /aria-label="Параметры отчета"/);
+    assert.match(commandBarSource, /aria-label="Период отчета"/);
+    assert.match(commandBarSource, /aria-label="Сравнение периодов"/);
+    assert.match(commandBarSource, /onClick=\{onFilters\}[\s\S]*?Фильтры/);
+    assert.match(commandBarSource, /onClick=\{onRefresh\}/);
+    assert.match(commandBarSource, /onClick=\{onExport\}[\s\S]*?Экспорт/);
+    assert.match(commandBarSource, /aria-live="polite"/);
+  });
+
+  it("renders a modal filter drawer from server-provided dimensions", () => {
+    assert.match(filterDrawerSource, /aria-label="Фильтры отчета"/);
+    assert.match(filterDrawerSource, /aria-modal="true"/);
+    assert.match(filterDrawerSource, /role="dialog"/);
+
+    for (const dimension of ["channel", "operatorId", "queueId", "resolutionOutcome", "status", "teamId", "topic"]) {
+      assert.match(filterDrawerSource, new RegExp(`key: "${dimension}"`), `${dimension} must remain a server facet`);
     }
-    assert.match(source, /fetchReportWorkspace\(\{[\s\S]*\.\.\.reportFilters/);
-    assert.match(source, /requestReportExport\(\{[\s\S]*filters:\s*\{[\s\S]*\.\.\.reportFilters/);
-    assert.doesNotMatch(source, /\["Все каналы", "SDK", "Telegram", "MAX", "VK"\]/);
+    assert.match(filterDrawerSource, /optionRows\(options\?\.\[field\.optionsKey\]/);
+    assert.match(filterDrawerSource, />Сбросить</);
+    assert.match(filterDrawerSource, />Применить</);
+    assert.doesNotMatch(filterDrawerSource, /\["Все каналы", "SDK", "Telegram", "MAX", "VK"\]/);
+  });
+
+  it("uses split report components instead of re-implementing their controls in the screen", () => {
+    for (const component of ["ReportCommandBar", "ReportFilterDrawer", "KpiOverview", "AccessibleTrendChart"]) {
+      assert.match(reportsScreenSource, new RegExp(`(?:import|<)${component}`), `ReportsScreen must compose ${component}`);
+    }
+  });
+
+  it("renders every trend series with a readable summary and exact tabular fallback", () => {
+    assert.match(trendChartSource, /timeSeries\.series\.map/);
+    assert.match(trendChartSource, /<polyline/);
+    assert.match(trendChartSource, /role="img"/);
+    assert.match(trendChartSource, /role="status"/);
+    assert.match(trendChartSource, /Табличные данные графика/);
+    for (const heading of ["Период", "Входящие", "Решено", "Бэклог"]) {
+      assert.match(trendChartSource, new RegExp(`<th scope="col">${heading}</th>`));
+    }
+    assert.doesNotMatch(trendChartSource, /return\s+18|Math\.max\(18/, "zero values must stay on the zero baseline");
+  });
+
+  it("keeps unavailable hero KPIs visible and explains why they cannot be calculated", () => {
+    assert.match(kpiOverviewSource, /HERO_METRIC_KEYS\.map/);
+    assert.doesNotMatch(kpiOverviewSource, /\.filter\([^\n]*metric\.value\s*!==\s*null/, "unavailable KPIs must not disappear");
+    assert.match(kpiOverviewSource, /unavailableReason|Метрика недоступна|Недостаточно/);
+  });
+
+  it("does not send an invalid custom range to either report endpoint", () => {
+    assert.match(reportsScreenSource, /useReportWorkspace\(view,\s*\{\s*enabled:\s*validation\.valid\s*\}\)/);
+    assert.match(reportsScreenSource, /useRoutingActivity\(view,\s*\{\s*enabled:\s*validation\.valid\s*\}\)/);
+    for (const source of [workspaceHookSource, routingHookSource]) {
+      assert.match(source, /enabled/);
+      assert.match(source, /if\s*\(\s*!enabled\s*\)/);
+    }
+  });
+
+  it("restarts routing activity for every server facet and never exposes rows from the previous query", () => {
+    for (const dimension of ["channel", "operatorId", "queueId", "resolutionOutcome", "status", "teamId", "topic"]) {
+      assert.match(
+        routingHookSource,
+        new RegExp(`view\\.filters\\.${dimension}`),
+        `routing activity must depend on ${dimension}`
+      );
+    }
+    assert.match(routingHookSource, /dataQueryKey:\s*queryKey/);
+    assert.match(routingHookSource, /const matchesQuery = state\.dataQueryKey === queryKey/);
+    assert.match(routingHookSource, /rows:\s*matchesQuery \? state\.rows : \[\]/);
+    assert.match(routingHookSource, /totals:\s*matchesQuery \? state\.totals : \{\}/);
   });
 });

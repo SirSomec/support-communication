@@ -421,69 +421,70 @@ test("shift panel redistribution preview and commit are backend backed", async (
   await expectHealthyPage(page);
 });
 
-test("reports metrics table exposes semantic headers and keyboard column controls", async ({ page }) => {
+test("reports workspace exposes accessible KPI, trend, filter and export controls", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Отчеты");
 
-  const routingActivityReport = page.getByTestId("routing-activity-report");
-  await expect(routingActivityReport).toBeVisible();
-  await expect(routingActivityReport).toContainText("Назначения и передачи");
-  await expect(routingActivityReport).toContainText("по фактическим событиям");
-  const routingActivityTable = routingActivityReport.getByRole("table", {
-    name: "Активность назначений и передач по операторам"
-  });
-  const emptyRoutingActivity = routingActivityReport.getByText(
-    "За выбранный период назначений и передач нет.",
-    { exact: true }
-  );
-  await expect.poll(async () => (
-    await routingActivityTable.count()
-  ) + (
-    await emptyRoutingActivity.count()
-  )).toBe(1);
-  if (await routingActivityTable.count()) {
-    await expect(routingActivityTable.getByRole("columnheader", { name: "Оператор" })).toBeVisible();
-    await expect(routingActivityTable.getByRole("columnheader", { name: "Всего событий" })).toBeVisible();
-    await expect(routingActivityTable.getByRole("row").filter({ hasText: "usr-volga-admin" })).toContainText("1");
+  await expect(page.getByRole("heading", { name: "Отчеты" })).toBeVisible();
+  const commandBar = page.getByRole("region", { name: "Параметры отчета" });
+  await expect(commandBar).toBeVisible();
+  await expect(page.getByRole("region", { name: "Ключевые показатели" })).toBeVisible();
+
+  const period = page.getByLabel("Период отчета");
+  await period.focus();
+  await expect(period).toBeFocused();
+  await period.selectOption("custom");
+  await page.getByLabel("С", { exact: true }).fill("2026-08-01");
+  await page.getByLabel("По", { exact: true }).fill("2026-08-18");
+  await expect.poll(() => page.url()).toContain("reportPeriod=custom");
+  await expect.poll(() => page.url()).toContain("reportFrom=2026-08-01");
+  await expect.poll(() => page.url()).toContain("reportTo=2026-08-18");
+
+  const trendChart = page.getByRole("img", { name: /График динамики обращений/ });
+  const emptyTrend = page.getByText("Нет событий для построения динамики за выбранный период.", { exact: true });
+  await expect.poll(async () => await trendChart.count() + await emptyTrend.count()).toBe(1);
+  if (await trendChart.count()) {
+    await expect(trendChart).toBeVisible();
+    await page.getByText("Табличные данные графика", { exact: true }).click();
+    const trendTable = page.getByRole("table", { name: "Динамика обращений" });
+    await expect(trendTable).toBeVisible();
+    for (const heading of ["Период", "Входящие", "Решено", "Бэклог"]) {
+      await expect(trendTable.getByRole("columnheader", { name: heading })).toBeVisible();
+    }
   } else {
-    await expect(emptyRoutingActivity).toBeVisible();
+    await expect(emptyTrend).toBeVisible();
   }
 
-  const reportTable = page.getByRole("table", { name: "Показатели отчета" });
-  await expect(reportTable).toBeVisible();
-  await expect(reportTable.getByRole("columnheader", { name: "Показатель" })).toBeVisible();
-  await expect(reportTable.getByRole("columnheader", { name: "Текущий период" })).toBeVisible();
-  const newDialogsRow = reportTable.getByRole("row").filter({ hasText: "Новые диалоги" });
-  await expect(newDialogsRow.getByRole("rowheader", { name: "Новые диалоги" })).toBeVisible();
-  await expect(newDialogsRow).toContainText("0");
+  await page.getByRole("button", { name: /Фильтры/ }).click();
+  const filterDialog = page.getByRole("dialog", { name: "Фильтры отчета" });
+  await expect(filterDialog).toBeVisible();
+  for (const facet of ["Канал", "Команда", "Очередь", "Оператор", "Тематика", "Статус", "Результат решения"]) {
+    await expect(filterDialog.getByRole("combobox", { name: facet, exact: true })).toBeVisible();
+  }
+  await filterDialog.getByRole("button", { name: "Сбросить" }).click();
+  await filterDialog.getByRole("button", { name: "Применить" }).click();
+  await expect(filterDialog).toHaveCount(0);
 
-  const previousPeriodToggle = page.getByRole("checkbox", { name: "Сравнение" });
-  await previousPeriodToggle.focus();
-  await expect(previousPeriodToggle).toBeFocused();
-  await page.keyboard.press("Space");
-  await expect(reportTable.getByRole("columnheader", { name: "Сравнение" })).toHaveCount(0);
-  await page.keyboard.press("Space");
-  await expect(reportTable.getByRole("columnheader", { name: "Сравнение" })).toBeVisible();
-
+  await page.getByRole("button", { name: "Экспорт", exact: true }).click();
+  const exportDialog = page.getByRole("dialog", { name: "Экспорт отчетов" });
+  await expect(exportDialog).toBeVisible();
+  for (const format of ["XLSX", "CSV", "JSON", "PDF"]) {
+    await expect(exportDialog.getByText(format, { exact: false }).first()).toBeVisible();
+  }
   const exportResponse = page.waitForResponse((response) =>
     response.url().includes("/api/v1/reports/exports") && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Экспорт XLSX" }).click();
+  await exportDialog.getByRole("button", { name: "Создать выгрузку" }).click();
   const exportPayload = await (await exportResponse).json();
   expect(exportPayload.status).toBe("ok");
   expect(exportPayload.data.job.tenantId).toBeTruthy();
 
-  await page.getByRole("button", { name: "История" }).click();
-  await expect(page.getByTestId("report-export-history-panel")).toBeVisible();
-  await expect(page.getByTestId("report-export-history-panel")).toContainText("История экспортов");
-  await expect(page.getByTestId("report-export-history-panel")).toContainText("evt_report_");
-
-  await expect(page.getByTestId("report-audit-panel")).toBeVisible();
-  await expect(page.getByTestId("report-audit-panel")).toContainText("evt_report_");
-  await expect(page.getByTestId("report-audit-panel")).toContainText("запись не изменяется");
-  await expect(page.getByTestId("report-audit-panel")).toContainText("report_");
-  await expect(page.getByTestId("report-audit-panel")).toContainText("metrics/v1");
+  await expect(exportDialog.getByTestId("report-export-history-panel")).toBeVisible();
+  await expect(exportDialog.getByText(/audit|аудит|не изменяется/i).first()).toBeVisible();
+  await exportDialog.getByRole("tab", { name: "Диалоги" }).click();
+  await expect(exportDialog.getByTestId("dialog-export-panel")).toBeVisible();
+  await expect(exportDialog.getByTestId("dialog-export-run")).toBeVisible();
   await expectHealthyPage(page);
 });
 

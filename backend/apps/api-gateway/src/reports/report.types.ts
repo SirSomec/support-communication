@@ -1,3 +1,7 @@
+export type MetricReportExportFormat = "CSV" | "JSON" | "XLSX";
+export type DialogTranscriptExportFormat = "HTML" | "JSON" | "TXT" | "XLSX";
+export type ReportExportFormat = MetricReportExportFormat | DialogTranscriptExportFormat | "PDF";
+
 export interface ReportExportJob {
   auditId: string;
   backendQueueId?: string;
@@ -8,7 +12,7 @@ export interface ReportExportJob {
   failureMessage?: string;
   fileName?: string;
   filters?: Record<string, unknown>;
-  format: "CSV" | "HTML" | "JSON" | "PDF" | "TXT" | "XLSX";
+  format: ReportExportFormat;
   id: string;
   metricDefinitionVersion?: string;
   name: string;

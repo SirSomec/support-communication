@@ -3,8 +3,10 @@ import { createEnvelope, redactExportedDescriptor, type BackendEnvelope } from "
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import {
   executeCsvReportExport,
+  executeJsonReportExport,
   executeXlsxReportExport,
   reportSnapshotAt,
+  supportOperationsExportRows,
   writeReportExportObject,
   type ReportCsvColumn,
   type ReportObjectStorageBody,
@@ -24,7 +26,7 @@ import {
   type DialogTranscriptFormat
 } from "./report-dialog-transcripts.js";
 import { createSharedReportObjectStorage, type ReportObjectStorageDownloadSigner } from "./report-object-storage.js";
-import type { ReportExportJob } from "./report.types.js";
+import type { MetricReportExportFormat, ReportExportJob } from "./report.types.js";
 import {
   ReportRepository,
   type ConversationFacetSourceRow,
@@ -46,6 +48,11 @@ import {
   filterReportConversations,
   type ConversationReportFilters
 } from "./report-conversation-filters.js";
+import {
+  buildSupportOperationsWorkspace,
+  type SupportOperationsWorkspace,
+  type SupportOperationsWorkspaceOptions
+} from "./support-operations-workspace.js";
 
 const REPORT_SERVICE = "reportService";
 
@@ -60,19 +67,30 @@ interface ReportWorkspaceFilters extends ConversationReportFilters {
 
 export interface RoutingActivityReportFilters {
   channel?: string;
+  dateFrom?: string;
+  dateTo?: string;
   eventType?: string;
   operatorId?: string;
   period?: string;
+  queueId?: string;
+  resolutionOutcome?: string;
+  status?: string;
+  teamId?: string;
+  timezoneOffsetMinutes?: number | string;
+  topic?: string;
 }
 
 interface RequestReportExportPayload {
   channel?: string;
-  columns?: string[];
+  columns?: unknown;
+  dateFrom?: string;
+  dateTo?: string;
   filters?: Record<string, unknown>;
-  format?: string;
-  idempotencyKey?: string;
+  format?: unknown;
+  idempotencyKey?: unknown;
   period?: string;
   reportType?: string;
+  timezoneOffsetMinutes?: number | string;
 }
 
 interface SaveSavedReportTemplatePayload {
@@ -170,32 +188,54 @@ export class ReportService {
       );
     }
 
+    const snapshotAt = this.now();
     let workspace: LiveReportWorkspace;
+    let timezoneOffsetMinutes: number;
     try {
+      timezoneOffsetMinutes = normalizeTimezoneOffset(filters.timezoneOffsetMinutes);
       workspace = buildLiveReportWorkspace([], {
-        now: this.now(),
-        period: filters.period as LiveReportWorkspaceOptions["period"]
+        dateFrom: normalizeReportDateInput(filters.dateFrom),
+        dateTo: normalizeReportDateInput(filters.dateTo),
+        now: snapshotAt,
+        period: filters.period as LiveReportWorkspaceOptions["period"],
+        timezoneOffsetMinutes
       });
     } catch {
       return invalidEnvelope(
         "fetchRoutingActivityReport",
         "routing_activity_period_invalid",
-        "Routing activity report period is not supported.",
-        { period: filters.period ?? null }
+        "Routing activity report period or date range is not supported.",
+        {
+          dateFrom: filters.dateFrom ?? null,
+          dateTo: filters.dateTo ?? null,
+          period: filters.period ?? null,
+          timezoneOffsetMinutes: filters.timezoneOffsetMinutes ?? null
+        }
       );
     }
 
     const channel = normalizeRoutingActivityFilter(filters.channel);
     const operatorId = normalizeRoutingActivityFilter(filters.operatorId);
+    const queueId = normalizeRoutingActivityFilter(filters.queueId);
+    const resolutionOutcome = normalizeRoutingActivityFilter(filters.resolutionOutcome);
+    const status = normalizeRoutingActivityFilter(filters.status);
+    const teamId = normalizeRoutingActivityFilter(filters.teamId);
+    const topic = normalizeRoutingActivityFilter(filters.topic);
     const from = new Date(workspace.windows.current.from);
     const to = new Date(workspace.windows.current.to);
     const sourceRows = await this.reportRepository.listRoutingActivityReportSourceRowsAsync({
       from,
+      snapshotAt: new Date(Math.min(snapshotAt.getTime(), to.getTime())),
       tenantId,
       to,
       ...(channel ? { channel } : {}),
       ...(eventType ? { eventType } : {}),
-      ...(operatorId ? { operatorId } : {})
+      ...(operatorId ? { operatorId } : {}),
+      ...(queueId ? { queueId } : {}),
+      ...(resolutionOutcome ? { resolutionOutcome } : {}),
+      ...(status ? { status } : {}),
+      ...(teamId ? { teamId } : {}),
+      ...(topic ? { topic } : {})
     });
     const rows = sourceRows.filter((row) => isRoutingActivityRowInScope(row, {
       channel,
@@ -217,9 +257,17 @@ export class ReportService {
         empty: rows.length === 0,
         filters: {
           channel: channel ?? "all",
+          ...(filters.dateFrom !== undefined ? { dateFrom: filters.dateFrom } : {}),
+          ...(filters.dateTo !== undefined ? { dateTo: filters.dateTo } : {}),
           eventType: eventType ?? "all",
           operatorId: operatorId ?? "all",
-          period: workspace.period
+          period: workspace.period,
+          queueId: queueId ?? "all",
+          resolutionOutcome: resolutionOutcome ?? "all",
+          status: status ?? "all",
+          teamId: teamId ?? "all",
+          ...(filters.timezoneOffsetMinutes !== undefined ? { timezoneOffsetMinutes } : {}),
+          topic: topic ?? "all"
         },
         hasActivity: rows.length > 0,
         periodLabel: workspace.periodLabel,
@@ -284,6 +332,7 @@ export class ReportService {
       partial: false,
       meta: apiMeta({ filters }),
       data: {
+        operations: reportSource.operations,
         rows: reportRows,
         bars: clone(liveWorkspace.bars),
         chartBlocks: hasConversationActivity ? clone(liveWorkspace.chartBlocks) : [],
@@ -338,33 +387,52 @@ export class ReportService {
     snapshotAt = this.now()
   ): Promise<{
     facetRows: Awaited<ReturnType<ReportRepository["listConversationFacetRowsAsync"]>>;
-    filteredRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
-    sourceRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
+    filteredRows: Awaited<ReturnType<ReportRepository["listSupportOperationsSourceRowsAsync"]>>;
+    operations: SupportOperationsWorkspace;
+    sourceRows: Awaited<ReturnType<ReportRepository["listSupportOperationsSourceRowsAsync"]>>;
     workspace: LiveReportWorkspace;
   }> {
+    const dateFrom = normalizeReportDateInput(filters.dateFrom);
+    const dateTo = normalizeReportDateInput(filters.dateTo);
+    const timezoneOffsetMinutes = normalizeTimezoneOffset(filters.timezoneOffsetMinutes);
     const options: LiveReportWorkspaceOptions = {
       channel: filters.channel,
-      dateFrom: filters.dateFrom,
-      dateTo: filters.dateTo,
+      dateFrom,
+      dateTo,
       now: snapshotAt,
       period: filters.period as LiveReportWorkspaceOptions["period"],
-      timezoneOffsetMinutes: normalizeTimezoneOffset(filters.timezoneOffsetMinutes)
+      timezoneOffsetMinutes
     };
-    const emptyWorkspace = buildLiveReportWorkspace([], options);
+    const operationsOptions: SupportOperationsWorkspaceOptions = {
+      channel: filters.channel,
+      dateFrom,
+      dateTo,
+      now: snapshotAt,
+      period: filters.period as SupportOperationsWorkspaceOptions["period"],
+      timezoneOffsetMinutes,
+      topic: filters.topic
+    };
+    const emptyOperations = buildSupportOperationsWorkspace([], operationsOptions);
     const window = {
-      from: new Date(emptyWorkspace.windows.previous.from),
+      from: new Date(emptyOperations.period.previous.from),
+      snapshotAt,
       tenantId,
-      to: new Date(emptyWorkspace.windows.current.to)
+      to: new Date(emptyOperations.period.current.to)
     };
     const [sourceRows, facetRows] = await Promise.all([
-      this.reportRepository.listConversationReportSourceRowsAsync(window),
-      this.reportRepository.listConversationFacetRowsAsync(window)
+      this.reportRepository.listSupportOperationsSourceRowsAsync(window),
+      this.reportRepository.listConversationFacetRowsAsync({
+        from: window.from,
+        tenantId,
+        to: window.to
+      })
     ]);
 
     const conversations = filterReportConversations(sourceRows, filters);
     return {
       facetRows,
       filteredRows: conversations,
+      operations: buildSupportOperationsWorkspace(conversations, operationsOptions),
       sourceRows,
       workspace: buildLiveReportWorkspace(conversations as LiveReportConversation[], options)
     };
@@ -590,7 +658,45 @@ export class ReportService {
       return tenantScopeRequiredEnvelope("requestReportExport");
     }
     const dialogTranscriptExport = isDialogTranscriptReportType(payload.reportType);
+    const allowedColumnIds = new Set(dialogTranscriptExport
+      ? DIALOG_TRANSCRIPT_COLUMN_IDS
+      : defaultReportColumnOptions.map((column) => column.id));
+    if (payload.columns !== undefined && !Array.isArray(payload.columns)) {
+      return invalidEnvelope("requestReportExport", "report_columns_invalid", "Report export columns must be an array of supported column identifiers.", {
+        columns: payload.columns,
+        reportType: payload.reportType ?? null
+      });
+    }
+    const requestedColumns = payload.columns as unknown[] | undefined;
+    if (requestedColumns?.some((column) => typeof column !== "string"
+      || column.length === 0
+      || column !== column.trim()
+      || !allowedColumnIds.has(column))
+      || new Set(requestedColumns).size !== (requestedColumns?.length ?? 0)) {
+      return invalidEnvelope("requestReportExport", "report_columns_invalid", "Report export columns must be unique supported non-empty string identifiers.", {
+        columns: payload.columns,
+        reportType: payload.reportType ?? null
+      });
+    }
+    let idempotencyKey: string | undefined;
+    if (payload.idempotencyKey !== undefined) {
+      if (typeof payload.idempotencyKey !== "string"
+        || payload.idempotencyKey.trim() === ""
+        || payload.idempotencyKey.includes("\0")) {
+        return invalidEnvelope("requestReportExport", "report_idempotency_key_invalid", "Report export idempotency key must be a non-empty string.", {
+          idempotencyKey: payload.idempotencyKey
+        });
+      }
+      idempotencyKey = payload.idempotencyKey.trim();
+    }
+    const filters: Record<string, unknown> = {
+      ...clone<Record<string, unknown>>(payload.filters ?? {}),
+      ...(payload.dateFrom !== undefined ? { dateFrom: payload.dateFrom } : {}),
+      ...(payload.dateTo !== undefined ? { dateTo: payload.dateTo } : {}),
+      ...(payload.timezoneOffsetMinutes !== undefined ? { timezoneOffsetMinutes: payload.timezoneOffsetMinutes } : {})
+    };
     let dialogTranscriptFormat: DialogTranscriptFormat | undefined;
+    let metricReportFormat: MetricReportExportFormat | undefined;
     if (dialogTranscriptExport) {
       dialogTranscriptFormat = normalizeDialogTranscriptFormat(payload.format ?? "XLSX");
       if (!dialogTranscriptFormat) {
@@ -599,15 +705,42 @@ export class ReportService {
           reportType: payload.reportType ?? null
         });
       }
-      if (dialogTranscriptDateRange(payload.filters) === "invalid") {
+      if (dialogTranscriptDateRange(filters) === "invalid") {
         return invalidEnvelope("requestReportExport", "report_export_period_invalid", "Dialog transcript export period range must be a valid dateFrom..dateTo pair.", {
-          dateFrom: payload.filters?.dateFrom ?? null,
-          dateTo: payload.filters?.dateTo ?? null
+          dateFrom: filters.dateFrom ?? null,
+          dateTo: filters.dateTo ?? null
+        });
+      }
+    } else {
+      metricReportFormat = normalizeMetricReportExportFormat(payload.format);
+      if (!metricReportFormat) {
+        return invalidEnvelope("requestReportExport", "report_export_format_unsupported", "Report export format must be XLSX, CSV or JSON.", {
+          format: payload.format ?? null,
+          reportType: payload.reportType ?? null
+        });
+      }
+
+      try {
+        buildSupportOperationsWorkspace([], {
+          channel: payload.channel,
+          dateFrom: normalizeReportDateInput(filters.dateFrom),
+          dateTo: normalizeReportDateInput(filters.dateTo),
+          now: this.now(),
+          period: payload.period as SupportOperationsWorkspaceOptions["period"],
+          timezoneOffsetMinutes: normalizeReportTimezoneOffset(filters.timezoneOffsetMinutes)
+        });
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        return invalidEnvelope("requestReportExport", "report_export_period_invalid", "Report export period, date range or timezone is invalid.", {
+          dateFrom: filters.dateFrom ?? null,
+          dateTo: filters.dateTo ?? null,
+          period: payload.period ?? null,
+          timezoneOffsetMinutes: filters.timezoneOffsetMinutes ?? null
         });
       }
     }
-    const columns = payload.columns?.length
-      ? payload.columns
+    const columns = requestedColumns?.length
+      ? requestedColumns as string[]
       : dialogTranscriptExport
         ? [...DIALOG_TRANSCRIPT_COLUMN_IDS]
         : [];
@@ -620,8 +753,13 @@ export class ReportService {
       });
     }
 
-    const idempotencyKey = payload.idempotencyKey?.trim();
-    const fingerprint = requestFingerprint({ ...payload, columns }, tenantId);
+    const normalizedPayload = {
+      ...payload,
+      columns,
+      filters,
+      format: dialogTranscriptFormat ?? metricReportFormat
+    };
+    const fingerprint = requestFingerprint(normalizedPayload, tenantId);
     const existingRequest = idempotencyKey ? await this.findIdempotencyRequest(tenantId, idempotencyKey) : undefined;
 
     if (existingRequest) {
@@ -649,15 +787,15 @@ export class ReportService {
     }
 
     const createdAt = this.now().toISOString();
-    const requestedSnapshotAt = typeof payload.filters?.snapshotAt === "string"
-      ? payload.filters.snapshotAt
+    const requestedSnapshotAt = typeof filters.snapshotAt === "string"
+      ? filters.snapshotAt
       : createdAt;
     const job: ReportExportJob = {
       id: `export-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
       name: dialogTranscriptExport
         ? `Диалоги (переписка): ${payload.channel ?? "Все каналы"}`
         : `${payload.reportType ?? "Report"}: ${payload.channel ?? "all"}`,
-      format: dialogTranscriptFormat ?? "XLSX",
+      format: dialogTranscriptFormat ?? metricReportFormat ?? "XLSX",
       period: payload.period ?? "today",
       statusKey: "queued",
       status: "Queued",
@@ -672,7 +810,7 @@ export class ReportService {
       queue: "report-export",
       tenantId,
       filters: {
-        ...clone(payload.filters ?? {}),
+        ...filters,
         snapshotAt: requestedSnapshotAt,
         channel: payload.channel ?? "Все каналы",
         ...(dialogTranscriptExport ? { reportKind: DIALOG_TRANSCRIPT_REPORT_TYPE } : {}),
@@ -1020,7 +1158,7 @@ export class ReportService {
       return this.writeDialogTranscriptExportFile(job);
     }
 
-    if (job.format !== "CSV" && job.format !== "XLSX") {
+    if (job.format !== "CSV" && job.format !== "JSON" && job.format !== "XLSX") {
       return undefined;
     }
 
@@ -1031,8 +1169,10 @@ export class ReportService {
     const tenantId = reportExportTenantId(job);
     const fileName = reportExportFileName(job);
     const objectKey = `reports/${tenantId}/${job.id}/${fileName}`;
-    const liveWorkspace = await this.buildTenantConversationWorkspace(tenantId, {
+    const reportSource = await this.buildTenantConversationWorkspace(tenantId, {
       channel: typeof job.filters?.channel === "string" ? job.filters.channel : undefined,
+      dateFrom: typeof job.filters?.dateFrom === "string" ? job.filters.dateFrom : undefined,
+      dateTo: typeof job.filters?.dateTo === "string" ? job.filters.dateTo : undefined,
       operatorId: typeof job.filters?.operatorId === "string" ? job.filters.operatorId : undefined,
       outcome: typeof job.filters?.outcome === "string" ? job.filters.outcome : undefined,
       period: job.period,
@@ -1043,13 +1183,7 @@ export class ReportService {
       timezoneOffsetMinutes: job.filters?.timezoneOffsetMinutes as number | string | undefined,
       topic: typeof job.filters?.topic === "string" ? job.filters.topic : undefined
     }, reportSnapshotAt(job));
-    const rows = liveWorkspace.workspace.rows.map((row) => ({
-      delta: row.delta,
-      metric: row.metric,
-      previous: row.previous,
-      status: row.status,
-      today: row.current
-    }));
+    const rows = supportOperationsExportRows(reportSource.operations);
     const exportInput = {
       columns: reportExportColumns(job, this.readWorkspaceCatalog()),
       jobId: job.id,
@@ -1060,7 +1194,9 @@ export class ReportService {
     };
     const object = job.format === "CSV"
       ? await executeCsvReportExport(exportInput)
-      : await executeXlsxReportExport(exportInput);
+      : job.format === "JSON"
+        ? await executeJsonReportExport(exportInput)
+        : await executeXlsxReportExport(exportInput);
 
     return this.reportRepository.saveReportFileDescriptorAsync({
       checksum: object.checksum,
@@ -1181,10 +1317,38 @@ function buildOperatorOptions(
 function normalizeTimezoneOffset(value: number | string | undefined): number {
   if (value === undefined || value === "") return 0;
   const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || Math.abs(parsed) > 14 * 60) {
-    throw new RangeError("timezoneOffsetMinutes must be between -840 and 840.");
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || Math.abs(parsed) > 14 * 60) {
+    throw new RangeError("timezoneOffsetMinutes must be an integer between -840 and 840.");
   }
   return parsed;
+}
+
+function normalizeReportTimezoneOffset(value: unknown): number {
+  if (value === undefined || value === "") return 0;
+  if (typeof value !== "number" && typeof value !== "string") {
+    throw new RangeError("timezoneOffsetMinutes must be between -840 and 840.");
+  }
+  return normalizeTimezoneOffset(value);
+}
+
+function normalizeReportDateInput(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new RangeError("Report dates must use the YYYY-MM-DD calendar format.");
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new RangeError("Report dates must use the YYYY-MM-DD calendar format.");
+  }
+  return value;
+}
+
+function normalizeMetricReportExportFormat(value: unknown): MetricReportExportFormat | undefined {
+  if (value !== undefined && typeof value !== "string") return undefined;
+  const normalized = (value ?? "XLSX").trim().toUpperCase();
+  return normalized === "CSV" || normalized === "JSON" || normalized === "XLSX"
+    ? normalized
+    : undefined;
 }
 
 function reportTenantIdempotencyKey(tenantId: string, key: string): string {
@@ -1243,15 +1407,25 @@ function withReportWorkspaceDefaults(workspace: ReportWorkspaceCatalog): ReportW
     metricDefinitionVersion: workspace.metricDefinitionVersion || REPORT_METRIC_DEFINITION_VERSION,
     reportBars: clone(workspace.reportBars ?? []),
     reportChartBlocks: clone(workspace.reportChartBlocks ?? []),
-    reportColumnOptions: withDefaultList(workspace.reportColumnOptions, defaultReportColumnOptions),
+    reportColumnOptions: withDefaultReportColumns(workspace.reportColumnOptions, defaultReportColumnOptions),
     reportRows: clone(workspace.reportRows ?? []),
     rescueOutcomeSummary: clone(workspace.rescueOutcomeSummary ?? []),
     rescueReportRows: clone(workspace.rescueReportRows ?? [])
   };
 }
 
-function withDefaultList<T>(value: T[] | undefined, fallback: readonly T[]): T[] {
-  return Array.isArray(value) && value.length ? value : clone([...fallback]);
+function withDefaultReportColumns(value: unknown[] | undefined, fallback: readonly unknown[]): unknown[] {
+  const existing = Array.isArray(value) ? clone(value) : [];
+  const existingIds = new Set(existing.flatMap((item) => {
+    if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string") return [];
+    return [item.id];
+  }));
+  return [
+    ...existing,
+    ...clone(fallback.filter((item) => {
+      return !!item && typeof item === "object" && "id" in item && typeof item.id === "string" && !existingIds.has(item.id);
+    }))
+  ];
 }
 
 function tenantScopeRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
@@ -1357,17 +1531,19 @@ function exportJobPayload(job: ReportExportJob): Record<string, unknown> {
 }
 
 function requestFingerprint(payload: RequestReportExportPayload, tenantId: string): string {
+  const filters = payload.filters ?? {};
   return stableStringify({
     channel: payload.channel ?? null,
     columns: payload.columns ?? [],
-    filters: payload.filters ?? {},
-    // Для метрического экспорта формат в отпечаток не входит — иначе сменились бы
-    // отпечатки уже сохранённых идемпотентных запросов.
-    ...(isDialogTranscriptReportType(payload.reportType)
-      ? { format: normalizeDialogTranscriptFormat(payload.format ?? "XLSX") ?? null }
-      : {}),
+    dateFrom: payload.dateFrom ?? filters.dateFrom ?? null,
+    dateTo: payload.dateTo ?? filters.dateTo ?? null,
+    filters,
+    format: isDialogTranscriptReportType(payload.reportType)
+      ? normalizeDialogTranscriptFormat(payload.format ?? "XLSX") ?? null
+      : normalizeMetricReportExportFormat(payload.format) ?? null,
     period: payload.period ?? null,
     reportType: payload.reportType ?? null,
+    timezoneOffsetMinutes: payload.timezoneOffsetMinutes ?? filters.timezoneOffsetMinutes ?? null,
     tenantId
   });
 }
@@ -1421,7 +1597,8 @@ function reportExportColumns(job: ReportExportJob, catalog: ReportWorkspaceCatal
     : options.map((column) => column.id).filter((id): id is string => typeof id === "string" && id.length > 0);
 
   return requested.map((id) => {
-    const option = options.find((column) => column.id === id);
+    const option = options.find((column) => column.id === id)
+      ?? defaultReportColumnOptions.find((column) => column.id === id);
     return {
       id,
       label: option?.label ?? id
@@ -1454,7 +1631,7 @@ function normalizeRoutingActivityEventType(value: string | undefined): RoutingAc
 function normalizeRoutingActivityFilter(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   const lowered = normalized?.toLocaleLowerCase("ru-RU");
-  return !normalized || lowered === "all" || lowered === "все каналы" || lowered === "все операторы"
+  return !normalized || lowered === "all" || lowered?.startsWith("все ")
     ? undefined
     : normalized;
 }

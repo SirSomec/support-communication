@@ -116,7 +116,12 @@ describe("routing activity report contracts", () => {
       channel: "Telegram",
       eventType: "transfer",
       operatorId: "operator-b",
-      period: "today"
+      period: "today",
+      queueId: "all",
+      resolutionOutcome: "all",
+      status: "all",
+      teamId: "all",
+      topic: "all"
     });
     assert.deepEqual(envelope.data.totals, {
       assignments: 0,
@@ -145,6 +150,160 @@ describe("routing activity report contracts", () => {
         { fromOperatorId: "operator-b" },
         { toOperatorId: "operator-b" }
       ],
+      tenantId: "tenant-volga"
+    });
+  });
+
+  it("applies a tenant-scoped custom date window with the request timezone", async () => {
+    const calls: Array<{ orderBy: { occurredAt: "asc" }; where: Record<string, unknown> }> = [];
+    const repository = ReportRepository.prisma({
+      client: prismaClientWithRoutingRows([
+        routingRow("custom-start", "tenant-volga", "assignment", "2026-07-07T21:30:00.000Z", {
+          toOperatorId: "operator-a"
+        }),
+        routingRow("custom-end", "tenant-volga", "transfer", "2026-07-09T20:59:59.000Z", {
+          fromOperatorId: "operator-a",
+          toOperatorId: "operator-b"
+        }),
+        routingRow("outside-end", "tenant-volga", "assignment", "2026-07-09T21:00:00.000Z", {
+          toOperatorId: "operator-a"
+        }),
+        routingRow("foreign-tenant", "tenant-ladoga", "assignment", "2026-07-08T12:00:00.000Z", {
+          toOperatorId: "operator-c"
+        })
+      ], calls)
+    });
+    const service = new ReportService(repository, { now: () => NOW });
+
+    const envelope = await service.fetchRoutingActivityReport({
+      dateFrom: "2026-07-08",
+      dateTo: "2026-07-09",
+      period: "custom",
+      timezoneOffsetMinutes: 180
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(envelope.status, "ok");
+    assert.deepEqual(envelope.data.filters, {
+      channel: "all",
+      dateFrom: "2026-07-08",
+      dateTo: "2026-07-09",
+      eventType: "all",
+      operatorId: "all",
+      period: "custom",
+      queueId: "all",
+      resolutionOutcome: "all",
+      status: "all",
+      teamId: "all",
+      timezoneOffsetMinutes: 180,
+      topic: "all"
+    });
+    assert.equal(envelope.data.totals.totalEvents, 2);
+    assert.deepEqual(envelope.data.windows, {
+      current: {
+        from: "2026-07-07T21:00:00.000Z",
+        to: "2026-07-09T21:00:00.000Z"
+      }
+    });
+    assert.deepEqual(calls[0]?.where, {
+      eventKind: { in: ["assignment", "transfer"] },
+      occurredAt: {
+        gte: new Date("2026-07-07T21:00:00.000Z"),
+        lt: new Date("2026-07-09T21:00:00.000Z")
+      },
+      tenantId: "tenant-volga"
+    });
+  });
+
+  it("reconstructs routing dimensions before post-event changes using bounded tenant lifecycle history", async () => {
+    const calls = {
+      conversation: [] as Array<Record<string, any>>,
+      lifecycle: [] as Array<Record<string, any>>,
+      routing: [] as Array<Record<string, any>>
+    };
+    const repository = ReportRepository.prisma({
+      client: prismaClientWithRoutingConversationDimensions(calls)
+    });
+    const service = new ReportService(repository, { now: () => NOW });
+
+    const envelope = await service.fetchRoutingActivityReport({
+      period: "today",
+      queueId: "queue-a",
+      resolutionOutcome: "resolved",
+      status: "assigned",
+      teamId: "team-a",
+      topic: "Payments"
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(envelope.status, "ok");
+    assert.deepEqual(envelope.data.filters, {
+      channel: "all",
+      eventType: "all",
+      operatorId: "all",
+      period: "today",
+      queueId: "queue-a",
+      resolutionOutcome: "resolved",
+      status: "assigned",
+      teamId: "team-a",
+      topic: "Payments"
+    });
+    assert.deepEqual(envelope.data.totals, {
+      assignments: 2,
+      operators: 2,
+      totalEvents: 2,
+      transfers: 0,
+      unattributedEvents: 0
+    });
+    assert.deepEqual(envelope.data.rows, [
+      {
+        assignments: 1,
+        operatorId: "operator-a",
+        totalEvents: 1,
+        transferEvents: 0,
+        transfersFrom: 0,
+        transfersTo: 0
+      },
+      {
+        assignments: 1,
+        operatorId: "operator-r",
+        totalEvents: 1,
+        transferEvents: 0,
+        transfersFrom: 0,
+        transfersTo: 0
+      }
+    ]);
+
+    const newStateEnvelope = await service.fetchRoutingActivityReport({
+      period: "today",
+      queueId: "queue-later",
+      resolutionOutcome: "resolved",
+      status: "closed",
+      teamId: "team-later",
+      topic: "Later topic"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(newStateEnvelope.data.totals.totalEvents, 0);
+    assert.deepEqual(newStateEnvelope.data.rows, []);
+
+    const unrelatedStatusEnvelope = await service.fetchRoutingActivityReport({
+      period: "today",
+      queueId: "queue-a",
+      resolutionOutcome: "resolved",
+      status: "ok",
+      teamId: "team-a",
+      topic: "Payments"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(unrelatedStatusEnvelope.data.totals.totalEvents, 0);
+    assert.deepEqual(unrelatedStatusEnvelope.data.rows, []);
+
+    assert.equal(calls.routing[0]?.where.tenantId, "tenant-volga");
+    assert.equal(calls.conversation[0]?.where.tenantId, "tenant-volga");
+    assert.ok(calls.lifecycle.length >= 1);
+    assert.ok(calls.lifecycle.every((call) => call.where.tenantId === "tenant-volga"));
+    const historyCall = calls.lifecycle.find((call) => call.where.occurredAt === undefined);
+    assert.ok(historyCall);
+    assert.deepEqual(historyCall.where, {
+      conversationId: {
+        in: ["conversation-match", "conversation-reverse", "conversation-mismatch"]
+      },
       tenantId: "tenant-volga"
     });
   });
@@ -238,4 +397,216 @@ function prismaClientWithRoutingRows(
       throw new Error("not_used");
     }
   } as unknown as PrismaReportClient;
+}
+
+function prismaClientWithRoutingConversationDimensions(calls: {
+  conversation: Array<Record<string, any>>;
+  lifecycle: Array<Record<string, any>>;
+  routing: Array<Record<string, any>>;
+}): PrismaReportClient {
+  const conversations = [
+    routingConversation("conversation-match", "tenant-volga", {
+      // Persisted state has moved on; the last old-state observation is before
+      // the report window and must still govern the later routing event.
+      queueId: "queue-later",
+      resolutionOutcome: "resolved",
+      status: "closed",
+      teamId: "team-later",
+      topic: "Later topic"
+    }),
+    routingConversation("conversation-reverse", "tenant-volga", {
+      // This row has no earlier observation. Its first post-event transition
+      // carries from* provenance, which reconstructs the routing-time state.
+      queueId: "queue-later",
+      resolutionOutcome: "resolved",
+      status: "closed",
+      teamId: "team-later",
+      topic: "Later topic"
+    }),
+    routingConversation("conversation-mismatch", "tenant-volga", {
+      // The current row matches, but the event-time lifecycle facets do not.
+      queueId: "queue-a",
+      resolutionOutcome: "resolved",
+      status: "assigned",
+      teamId: "team-a",
+      topic: "Payments"
+    }),
+    routingConversation("conversation-foreign", "tenant-ladoga", {
+      queueId: "queue-a",
+      resolutionOutcome: "resolved",
+      status: "assigned",
+      teamId: "team-a",
+      topic: "Payments"
+    })
+  ];
+  const lifecycle = [
+    routingFacetLifecycle(conversations[0]!, "2026-07-09T20:00:00.000Z", {
+      queueId: "queue-a",
+      teamId: "team-a",
+      toStatus: "assigned",
+      toTopic: "Payments"
+    }),
+    // Generic status belongs to the event/provider payload, not to the
+    // conversation lifecycle. It must not shadow the earlier toStatus.
+    routingFacetLifecycle(conversations[0]!, "2026-07-10T07:30:00.000Z", {
+      status: "ok"
+    }),
+    routingFacetLifecycle(conversations[0]!, "2026-07-10T10:00:00.000Z", {
+      fromQueueId: "queue-a",
+      fromStatus: "assigned",
+      fromTeamId: "team-a",
+      fromTopic: "Payments",
+      toQueueId: "queue-later",
+      toStatus: "closed",
+      toTeamId: "team-later",
+      toTopic: "Later topic"
+    }),
+    routingFacetLifecycle(conversations[1]!, "2026-07-10T10:30:00.000Z", {
+      fromQueueId: "queue-a",
+      fromStatus: "assigned",
+      fromTeamId: "team-a",
+      fromTopic: "Payments",
+      toQueueId: "queue-later",
+      toStatus: "closed",
+      toTeamId: "team-later",
+      toTopic: "Later topic"
+    }),
+    routingFacetLifecycle(conversations[2]!, "2026-07-09T19:00:00.000Z", {
+      queueId: "queue-b",
+      teamId: "team-b",
+      toStatus: "queued",
+      toTopic: "Refunds"
+    }),
+    routingFacetLifecycle(conversations[3]!, "2026-07-10T10:00:00.000Z", {
+      queueId: "queue-a",
+      teamId: "team-a",
+      toStatus: "assigned",
+      toTopic: "Payments"
+    })
+  ];
+  const routing = [
+    routingRow("match", "tenant-volga", "assignment", "2026-07-10T08:00:00.000Z", {
+      conversationId: "conversation-match",
+      toOperatorId: "operator-a"
+    }),
+    routingRow("reverse", "tenant-volga", "assignment", "2026-07-10T08:30:00.000Z", {
+      conversationId: "conversation-reverse",
+      toOperatorId: "operator-r"
+    }),
+    routingRow("mismatch", "tenant-volga", "assignment", "2026-07-10T09:00:00.000Z", {
+      conversationId: "conversation-mismatch",
+      toOperatorId: "operator-b"
+    }),
+    routingRow("foreign", "tenant-ladoga", "assignment", "2026-07-10T10:00:00.000Z", {
+      conversationId: "conversation-foreign",
+      toOperatorId: "operator-c"
+    })
+  ];
+  const unusedDelegate = {};
+  return {
+    conversation: {
+      findMany(input: Record<string, any>) {
+        calls.conversation.push(input);
+        const snapshotAt = input.include.messages.where.createdAt.lte as Date;
+        return Promise.resolve(conversations
+          .filter((row) => row.tenantId === input.where.tenantId)
+          .map((row) => ({
+            ...row,
+            messages: row.messages.filter((message: Record<string, any>) => message.createdAt <= snapshotAt)
+          })));
+      }
+    },
+    conversationLifecycleEvent: {
+      findMany(input: Record<string, any>) {
+        calls.lifecycle.push(input);
+        const occurredAt = input.where.occurredAt as { gte?: Date; lt?: Date } | undefined;
+        const conversationIds = input.where.conversationId?.in as string[] | undefined;
+        const eventTypes = input.where.eventType?.in as string[] | undefined;
+        return Promise.resolve(lifecycle.filter((row) => row.tenantId === input.where.tenantId
+          && (!occurredAt?.gte || row.occurredAt >= occurredAt.gte)
+          && (!occurredAt?.lt || row.occurredAt < occurredAt.lt)
+          && (!conversationIds || conversationIds.includes(row.conversationId))
+          && (!eventTypes || eventTypes.includes(row.eventType))));
+      }
+    },
+    metricDefinition: unusedDelegate,
+    metricTenantOverride: unusedDelegate,
+    metricVersion: unusedDelegate,
+    qualityRating: { findMany: () => Promise.resolve([]) },
+    reportExportJob: unusedDelegate,
+    reportExportRetryAuditEvent: unusedDelegate,
+    reportFileDescriptor: unusedDelegate,
+    reportIdempotencyKey: unusedDelegate,
+    reportNotificationDescriptor: unusedDelegate,
+    reportQueryExecution: unusedDelegate,
+    routingAnalyticsRow: {
+      findMany(input: Record<string, any>) {
+        calls.routing.push(input);
+        const where = input.where as Record<string, any>;
+        return Promise.resolve(routing
+          .filter((row) => row.tenantId === where.tenantId
+            && new Date(row.occurredAt) >= where.occurredAt.gte
+            && new Date(row.occurredAt) < where.occurredAt.lt)
+          .map((row) => ({
+            ...row,
+            occurredAt: new Date(row.occurredAt)
+          })));
+      }
+    },
+    savedReportTemplate: unusedDelegate,
+    scheduledDigestDescriptor: unusedDelegate,
+    $transaction() {
+      throw new Error("not_used");
+    }
+  } as unknown as PrismaReportClient;
+}
+
+function routingConversation(
+  id: string,
+  tenantId: string,
+  overrides: Record<string, unknown>
+): Record<string, any> {
+  return {
+    channel: "Telegram",
+    createdAt: new Date("2026-07-01T00:00:00.000Z"),
+    id,
+    messages: [],
+    operatorId: null,
+    operatorName: null,
+    queueId: null,
+    resolutionOutcome: null,
+    slaTone: "ok",
+    status: "active",
+    teamId: null,
+    tenantId,
+    topic: "General",
+    updatedAt: new Date("2026-07-10T10:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function routingFacetLifecycle(
+  conversation: Record<string, any>,
+  occurredAt: string,
+  data: Record<string, unknown>
+): Record<string, any> {
+  return {
+    conversation: {
+      channel: conversation.channel,
+      operatorId: conversation.operatorId,
+      operatorName: conversation.operatorName,
+      queueId: conversation.queueId,
+      status: conversation.status,
+      teamId: conversation.teamId,
+      topic: conversation.topic
+    },
+    conversationId: conversation.id,
+    data,
+    eventType: "assignment.changed",
+    id: `lifecycle-${conversation.id}-${occurredAt}`,
+    ingestedAt: new Date(occurredAt),
+    occurredAt: new Date(occurredAt),
+    source: "routing-api",
+    tenantId: conversation.tenantId
+  };
 }

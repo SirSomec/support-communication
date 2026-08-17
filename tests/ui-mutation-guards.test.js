@@ -62,7 +62,7 @@ describe("UI mutation guards", () => {
   });
 
   it("uses report export download bytes instead of descriptor-only toast", () => {
-    const source = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../src/features/reports/components/ExportCenterDrawer.jsx", import.meta.url), "utf8");
 
     assert.match(source, /reportService\.downloadExportFile\(job\)/);
     assert.match(source, /URL\.createObjectURL\(response\.data\.blob\)/);

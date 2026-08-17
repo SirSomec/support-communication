@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
+import { matchesRoutingConversationFiltersAt } from "./report-conversation-filters.js";
 import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportIdempotencyRecord {
@@ -234,6 +235,7 @@ export interface ConversationReportSourceRow {
     source?: string;
   }>;
   messages: Array<{
+    author?: string;
     createdAt: string;
     id: string;
     side?: string;
@@ -244,7 +246,11 @@ export interface ConversationReportSourceRow {
   operatorId?: string;
   operatorName?: string;
   queueId?: string;
+  rating?: { createdAt: string; scale: string; score: number | null };
+  ratings?: Array<{ createdAt: string; scale: string; score: number | null }>;
+  resolutionOutcome?: string;
   slaTone: string;
+  statusBaseline?: { at: string; closed: boolean };
   status: string;
   teamId?: string;
   topic: string;
@@ -270,8 +276,14 @@ export interface RoutingActivityReportSourceFilters {
   eventType?: RoutingActivityEventType;
   from: Date;
   operatorId?: string;
+  queueId?: string;
+  resolutionOutcome?: string;
+  snapshotAt: Date;
+  status?: string;
+  teamId?: string;
   tenantId: string;
   to: Date;
+  topic?: string;
 }
 
 export interface ReportState {
@@ -310,7 +322,9 @@ interface PrismaReportDataClient {
         source: true;
       };
       where: {
-        occurredAt: { gte: Date; lt: Date };
+        conversationId?: { in: string[] };
+        eventType?: { in: string[] };
+        occurredAt?: { gte?: Date; lt?: Date };
         tenantId: string;
       };
     }): Promise<PrismaConversationLifecycleReportRow[]>;
@@ -332,6 +346,16 @@ interface PrismaReportDataClient {
         tenantId: string;
       };
     }): Promise<PrismaConversationFacetRow[]>;
+    findMany(input: {
+      include: {
+        messages: {
+          orderBy: { createdAt: "asc" };
+          where: { createdAt: { lte: Date } };
+        };
+      };
+      orderBy: { createdAt: "asc" };
+      where: PrismaSupportOperationsConversationWhereInput;
+    }): Promise<PrismaConversationReportRow[]>;
   };
   routingAnalyticsRow?: {
     findMany(input: {
@@ -343,6 +367,14 @@ interface PrismaReportDataClient {
     findMany(input: {
       orderBy: { createdAt: "asc" };
       where: { conversationId: { in: string[] }; tenantId: string };
+    }): Promise<PrismaQualityRatingReportRow[]>;
+    findMany(input: {
+      orderBy: { createdAt: "asc" };
+      where: {
+        conversationId: { in: string[] };
+        createdAt: { lte: Date };
+        tenantId: string;
+      };
     }): Promise<PrismaQualityRatingReportRow[]>;
   };
   metricDefinition: {
@@ -490,6 +522,16 @@ interface PrismaConversationReportRow {
   updatedAt: Date;
 }
 
+interface PrismaSupportOperationsConversationWhereInput {
+  OR: Array<
+    | { createdAt: { gte: Date; lt: Date } }
+    | { createdAt: { lte: Date }; updatedAt: { gte: Date } }
+    | { createdAt: { lte: Date }; status: { not: "closed" } }
+    | { id: { in: string[] } }
+  >;
+  tenantId: string;
+}
+
 interface PrismaQualityRatingReportRow {
   conversationId: string;
   createdAt: Date;
@@ -523,6 +565,21 @@ interface PrismaConversationLifecycleReportRow {
   occurredAt: Date;
   source: string;
 }
+
+const SUPPORT_OPERATIONS_STATUS_EVENT_TYPES = [
+  "conversation.closed",
+  "conversation_closed",
+  "conversation.reopened",
+  "conversation_reopened",
+  "conversation.resolved",
+  "conversation_resolved",
+  "resolution.recorded",
+  "resolution_recorded",
+  "resolution.reopened",
+  "resolution_reopened",
+  "status.changed",
+  "status_changed"
+];
 
 interface PrismaRoutingActivityReportWhereInput {
   channel?: string;
@@ -886,6 +943,7 @@ export class ReportRepository {
       createdAt: row.createdAt.toISOString(),
       id: row.id,
       messages: row.messages.map((message) => ({
+        ...(message.author ? { author: message.author } : {}),
         createdAt: message.createdAt.toISOString(),
         id: message.id,
         ...(message.side ? { side: message.side } : {}),
@@ -902,6 +960,188 @@ export class ReportRepository {
       topic: row.topic,
       updatedAt: row.updatedAt.toISOString()
     }));
+  }
+
+  /**
+   * Canonical source for support-operations reporting.
+   *
+   * The activity window can span both the selected and comparison periods. A
+   * separate snapshot boundary keeps the live backlog and mutable child facts
+   * (messages and ratings) from leaking data created after the report snapshot.
+   */
+  async listSupportOperationsSourceRowsAsync(input: {
+    conversationIds?: string[];
+    from: Date;
+    snapshotAt: Date;
+    tenantId: string;
+    to: Date;
+  }): Promise<ConversationReportSourceRow[]> {
+    if (!this.prismaClient?.conversation) {
+      return [];
+    }
+
+    // The window end is exclusive while the report snapshot itself is
+    // inclusive. Lifecycle rows are stored with millisecond precision, so one
+    // millisecond gives us a single exclusive bound without leaking events
+    // recorded after a delayed snapshot.
+    const lifecycleToExclusive = new Date(Math.min(
+      input.to.getTime(),
+      input.snapshotAt.getTime() + 1
+    ));
+    const lifecycleRows = this.prismaClient.conversationLifecycleEvent
+      ? await this.prismaClient.conversationLifecycleEvent.findMany({
+          orderBy: { occurredAt: "asc" },
+          select: {
+            conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
+            conversationId: true,
+            data: true,
+            eventType: true,
+            id: true,
+            ingestedAt: true,
+            occurredAt: true,
+            source: true
+          },
+          where: {
+            occurredAt: { gte: input.from, lt: lifecycleToExclusive },
+            tenantId: input.tenantId
+          }
+        })
+      : [];
+    const lifecycleByConversation = new Map<string, ConversationReportSourceRow["lifecycleEvents"]>();
+    for (const event of lifecycleRows) {
+      const events = lifecycleByConversation.get(event.conversationId) ?? [];
+      events.push({
+        ...(isRecord(event.data) ? { data: event.data } : {}),
+        eventType: event.eventType,
+        id: event.id,
+        ingestedAt: event.ingestedAt.toISOString(),
+        occurredAt: event.occurredAt.toISOString(),
+        source: event.source
+      });
+      lifecycleByConversation.set(event.conversationId, events);
+    }
+
+    const activityConversationIds = [...new Set([
+      ...lifecycleByConversation.keys(),
+      ...(input.conversationIds ?? [])
+    ])];
+    const rows = await this.prismaClient.conversation.findMany({
+      include: {
+        messages: {
+          orderBy: { createdAt: "asc" },
+          where: { createdAt: { lte: input.snapshotAt } }
+        }
+      },
+      orderBy: { createdAt: "asc" },
+      where: {
+        OR: [
+          { createdAt: { gte: input.from, lt: input.to } },
+          // A report can be materialized after a conversation that was open at
+          // its snapshot has since closed. Keep this candidate set bounded by
+          // the report horizon and tenant, but do not cap updatedAt at the old
+          // window end: the later mutation is precisely why the row is needed.
+          { createdAt: { lte: input.snapshotAt }, updatedAt: { gte: input.from } },
+          ...(activityConversationIds.length > 0 ? [{ id: { in: activityConversationIds } }] : []),
+          { createdAt: { lte: input.snapshotAt }, status: { not: "closed" } }
+        ],
+        tenantId: input.tenantId
+      }
+    });
+    // Reconstruct the status at the earliest report cutoff without reading the
+    // tenant's unbounded pre-window history. Persisted status is the state now;
+    // reversing every close/reopen transition after `from` for this bounded id
+    // set yields the state at `from`. There is intentionally no upper bound:
+    // a worker can materialize an old snapshot after a later close/reopen.
+    const statusLifecycleRows = this.prismaClient.conversationLifecycleEvent && rows.length > 0
+      ? await this.prismaClient.conversationLifecycleEvent.findMany({
+          orderBy: { occurredAt: "asc" },
+          select: {
+            conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
+            conversationId: true,
+            data: true,
+            eventType: true,
+            id: true,
+            ingestedAt: true,
+            occurredAt: true,
+            source: true
+          },
+          where: {
+            conversationId: { in: rows.map((row) => row.id) },
+            eventType: { in: SUPPORT_OPERATIONS_STATUS_EVENT_TYPES },
+            occurredAt: { gte: input.from },
+            tenantId: input.tenantId
+          }
+        })
+      : [];
+    const statusLifecycleByConversation = new Map<string, PrismaConversationLifecycleReportRow[]>();
+    for (const event of statusLifecycleRows) {
+      const events = statusLifecycleByConversation.get(event.conversationId) ?? [];
+      events.push(event);
+      statusLifecycleByConversation.set(event.conversationId, events);
+    }
+    const ratingRows = this.prismaClient.qualityRating && rows.length > 0
+      ? await this.prismaClient.qualityRating.findMany({
+          orderBy: { createdAt: "asc" },
+          where: {
+            conversationId: { in: rows.map((row) => row.id) },
+            createdAt: { lte: input.snapshotAt },
+            tenantId: input.tenantId
+          }
+        })
+      : [];
+    const ratingsByConversation = new Map<string, PrismaQualityRatingReportRow[]>();
+    for (const rating of ratingRows) {
+      const ratings = ratingsByConversation.get(rating.conversationId) ?? [];
+      ratings.push(rating);
+      ratingsByConversation.set(rating.conversationId, ratings);
+    }
+
+    return rows.map((row) => {
+      const lifecycleEvents = lifecycleByConversation.get(row.id);
+      const ratings = ratingsByConversation.get(row.id) ?? [];
+      const rating = ratings.at(-1);
+      return {
+        channel: row.channel,
+        createdAt: row.createdAt.toISOString(),
+        id: row.id,
+        ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
+        messages: row.messages.map((message) => ({
+          ...(message.author ? { author: message.author } : {}),
+          createdAt: message.createdAt.toISOString(),
+          id: message.id,
+          ...(message.side ? { side: message.side } : {}),
+          text: message.text,
+          time: message.time,
+          ...(message.type ? { type: message.type } : {})
+        })),
+        ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+        ...(row.operatorName ? { operatorName: row.operatorName } : {}),
+        ...(row.queueId ? { queueId: row.queueId } : {}),
+        ...(rating
+          ? { rating: { createdAt: rating.createdAt.toISOString(), scale: rating.scale, score: rating.score } }
+          : {}),
+        ...(ratings.length
+          ? {
+              ratings: ratings.map((item) => ({
+                createdAt: item.createdAt.toISOString(),
+                scale: item.scale,
+                score: item.score
+              }))
+            }
+          : {}),
+        ...(row.resolutionOutcome ? { resolutionOutcome: row.resolutionOutcome } : {}),
+        slaTone: row.slaTone,
+        statusBaseline: supportOperationsStatusBaseline(
+          row.status,
+          statusLifecycleByConversation.get(row.id) ?? [],
+          input.from
+        ),
+        status: row.status,
+        ...(row.teamId ? { teamId: row.teamId } : {}),
+        topic: row.topic,
+        updatedAt: row.updatedAt.toISOString()
+      };
+    });
   }
 
   // Лёгкая выборка фасетов диалогов окна (без сообщений): наполняет селекты
@@ -1016,19 +1256,85 @@ export class ReportRepository {
       }
     });
 
-    return rows.flatMap((row) => row.eventKind === "assignment" || row.eventKind === "transfer"
+    const routingRows: RoutingActivityReportSourceRow[] = rows.flatMap((row) => row.eventKind === "assignment" || row.eventKind === "transfer"
       ? [{
           channel: row.channel,
           conversationId: row.conversationId,
-          eventKind: row.eventKind,
+          eventKind: row.eventKind as RoutingActivityEventType,
           fromOperatorId: row.fromOperatorId,
           id: row.id,
           occurredAt: row.occurredAt.toISOString(),
           source: row.source,
           tenantId: row.tenantId,
           toOperatorId: row.toOperatorId
-        }]
+      }]
       : []);
+    const conversationFilters = {
+      ...(input.queueId ? { queueId: input.queueId } : {}),
+      ...(input.resolutionOutcome ? { resolutionOutcome: input.resolutionOutcome } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.teamId ? { teamId: input.teamId } : {}),
+      ...(input.topic ? { topic: input.topic } : {})
+    };
+    if (Object.keys(conversationFilters).length === 0 || routingRows.length === 0) return routingRows;
+
+    const routingConversationIds = [...new Set(routingRows.map((row) => row.conversationId))];
+    const [conversationRows, routingFacetHistoryRows] = await Promise.all([
+      this.listSupportOperationsSourceRowsAsync({
+        conversationIds: routingConversationIds,
+        from: input.from,
+        snapshotAt: input.snapshotAt,
+        tenantId: input.tenantId,
+        to: new Date(Math.min(input.to.getTime(), input.snapshotAt.getTime()))
+      }),
+      // Deliberately read the complete facet history only for conversation IDs
+      // present in this routing window. A pre-window observation or a later
+      // transition can be required to reconstruct the value at the routing
+      // event; tenant + bounded IDs keeps this from becoming a tenant-wide
+      // lifecycle scan.
+      this.prismaClient.conversationLifecycleEvent
+        ? this.prismaClient.conversationLifecycleEvent.findMany({
+            orderBy: { occurredAt: "asc" },
+            select: {
+              conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
+              conversationId: true,
+              data: true,
+              eventType: true,
+              id: true,
+              ingestedAt: true,
+              occurredAt: true,
+              source: true
+            },
+            where: {
+              conversationId: { in: routingConversationIds },
+              tenantId: input.tenantId
+            }
+          })
+        : Promise.resolve([])
+    ]);
+    const conversationById = new Map(conversationRows.map((row) => [row.id, row]));
+    const facetHistoryByConversation = new Map<string, NonNullable<ConversationReportSourceRow["lifecycleEvents"]>>();
+    for (const event of routingFacetHistoryRows) {
+      const events = facetHistoryByConversation.get(event.conversationId) ?? [];
+      events.push({
+        ...(isRecord(event.data) ? { data: event.data } : {}),
+        eventType: event.eventType,
+        id: event.id,
+        ingestedAt: event.ingestedAt.toISOString(),
+        occurredAt: event.occurredAt.toISOString(),
+        source: event.source
+      });
+      facetHistoryByConversation.set(event.conversationId, events);
+    }
+    return routingRows.filter((routingRow) => {
+      const conversation = conversationById.get(routingRow.conversationId);
+      return !!conversation && matchesRoutingConversationFiltersAt(
+        conversation,
+        conversationFilters,
+        routingRow.occurredAt,
+        facetHistoryByConversation.get(routingRow.conversationId) ?? []
+      );
+    });
   }
 
   saveState(state: ReportState): ReportState {
@@ -2571,6 +2877,53 @@ function toReportIdempotencyRecord(row: PrismaReportIdempotencyKeyRow): ReportId
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function supportOperationsStatusBaseline(
+  currentStatus: string,
+  events: readonly PrismaConversationLifecycleReportRow[],
+  at: Date
+): { at: string; closed: boolean } {
+  let closed = isClosedConversationStatus(currentStatus);
+  for (const event of [...events].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime())) {
+    const data = isRecord(event.data) ? event.data : {};
+    if (typeof data.fromStatus === "string") {
+      closed = isClosedConversationStatus(data.fromStatus);
+    } else if (isSupportOperationsReopenEvent(event.eventType, data)) {
+      closed = true;
+    } else if (isSupportOperationsCloseEvent(event.eventType, data)) {
+      closed = false;
+    }
+  }
+  return { at: at.toISOString(), closed };
+}
+
+function isSupportOperationsCloseEvent(eventType: string, data: Record<string, unknown>): boolean {
+  const normalized = normalizeSupportOperationsEventType(eventType);
+  return normalized === "conversation.closed"
+    || normalized === "conversation.resolved"
+    || normalized === "resolution.recorded"
+    || (normalized === "status.changed" && isClosedConversationStatus(data.toStatus));
+}
+
+function isSupportOperationsReopenEvent(eventType: string, data: Record<string, unknown>): boolean {
+  const normalized = normalizeSupportOperationsEventType(eventType);
+  if (normalized === "conversation.reopened" || normalized === "resolution.reopened") return true;
+  return normalized === "status.changed"
+    && isClosedConversationStatus(data.fromStatus)
+    && typeof data.toStatus === "string"
+    && !isClosedConversationStatus(data.toStatus);
+}
+
+function isClosedConversationStatus(value: unknown): boolean {
+  return new Set([
+    "closed", "completed", "done", "resolved",
+    "закрыт", "закрыта", "закрыто", "завершен", "завершена", "завершено"
+  ]).has(typeof value === "string" ? value.trim().toLocaleLowerCase("ru-RU") : "");
+}
+
+function normalizeSupportOperationsEventType(value: string): string {
+  return value.trim().toLocaleLowerCase("ru-RU").replaceAll("_", ".");
 }
 
 function normalizeReportIdempotencyRecord(record: ReportIdempotencyRecord): ReportIdempotencyRecord {

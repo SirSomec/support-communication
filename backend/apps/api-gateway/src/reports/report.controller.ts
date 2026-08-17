@@ -40,9 +40,17 @@ export class ReportController {
   @ApiOkResponse({ description: "Tenant-scoped assignment and transfer activity report envelope" })
   fetchRoutingActivityReport(@Query() query: {
     channel?: string;
+    dateFrom?: string;
+    dateTo?: string;
     eventType?: string;
     operatorId?: string;
     period?: string;
+    queueId?: string;
+    resolutionOutcome?: string;
+    status?: string;
+    teamId?: string;
+    timezoneOffsetMinutes?: string;
+    topic?: string;
   }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
     return this.reportService.fetchRoutingActivityReport(query, reportContextFromServiceAdminRequest(request));
   }
@@ -55,11 +63,14 @@ export class ReportController {
   requestReportExport(@Body() payload: {
     channel?: string;
     columns?: string[];
+    dateFrom?: string;
+    dateTo?: string;
     filters?: Record<string, unknown>;
     format?: string;
     idempotencyKey?: string;
     period?: string;
     reportType?: string;
+    timezoneOffsetMinutes?: number | string;
   }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
     return this.reportService.requestReportExport(payload, reportContextFromServiceAdminRequest(request));
   }

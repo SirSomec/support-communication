@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
+import { ReportRepository, type ConversationReportSourceRow } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { bootstrapReportState } from "../apps/api-gateway/src/reports/seed.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
 import { claimDueScheduledDigestDescriptors, queueScheduledDigestExportJob } from "../apps/api-gateway/src/reports/report-digest.worker.ts";
@@ -573,7 +573,7 @@ describe("report export worker contracts", () => {
     assert.equal(job?.statusKey, "ready");
     assert.equal(job?.status, "Ready");
     assert.equal(job?.progress, 100);
-    assert.equal(job?.rows, 4);
+    assert.equal(job?.rows, 33);
     assert.equal(job?.fileName, "export-worker-runtime.xlsx");
     assert.equal(job?.filters?.eventWatermark, null);
     assert.equal(object.objectKey, "reports/tenant-volga/export-worker-runtime/export-worker-runtime.xlsx");
@@ -583,6 +583,168 @@ describe("report export worker contracts", () => {
     assert.equal(descriptor?.checksum, object.checksum);
     assert.equal(descriptor?.sizeBytes, object.sizeBytes);
     assert.equal(descriptor?.tenantId, "tenant-volga");
+  });
+
+  it("materializes a tenant-scoped custom metric window as the requested JSON format", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({
+      exportJobs: [],
+      reportFileDescriptors: []
+    }));
+    const sourceQueries: Array<{ from: Date; snapshotAt: Date; tenantId: string; to: Date }> = [];
+    repository.listSupportOperationsSourceRowsAsync = async (input) => {
+      sourceQueries.push(input);
+      return [];
+    };
+    repository.saveExportJob(reportExportJob({
+      columns: ["metric", "today", "previous"],
+      createdAt: "2026-07-10T12:00:00.000Z",
+      filters: {
+        dateFrom: "2026-07-01",
+        dateTo: "2026-07-03",
+        snapshotAt: "2026-07-10T12:00:00.000Z",
+        tenantId: "tenant-volga",
+        timezoneOffsetMinutes: 180
+      },
+      format: "JSON",
+      id: "export-worker-custom-json",
+      period: "custom",
+      queue: "report-export-custom"
+    }));
+    const storage = createDeterministicReportObjectStorageAdapter({
+      now: () => new Date("2026-07-10T12:01:00.000Z")
+    });
+
+    const result = await executeReportExportWorkerOnce({
+      now: new Date("2026-07-10T12:01:00.000Z"),
+      queue: "report-export-custom",
+      reportRepository: repository,
+      storage
+    });
+    const object = storage.listObjects()[0];
+    const descriptor = repository.findReportFileDescriptor("export-worker-custom-json");
+    const persisted = repository.listExportJobs().find((job) => job.id === "export-worker-custom-json");
+
+    assert.deepEqual(result, { failed: 0, ready: 1, scanned: 1 });
+    assert.deepEqual(sourceQueries, [{
+      from: new Date("2026-06-27T21:00:00.000Z"),
+      snapshotAt: new Date("2026-07-10T12:00:00.000Z"),
+      tenantId: "tenant-volga",
+      to: new Date("2026-07-03T21:00:00.000Z")
+    }]);
+    assert.equal(object.objectKey, "reports/tenant-volga/export-worker-custom-json/export-worker-custom-json.json");
+    assert.equal(object.contentType, "application/json");
+    assert.equal(object.metadata.format, "json");
+    const payload = JSON.parse(Buffer.isBuffer(object.body) ? object.body.toString("utf8") : object.body);
+    assert.deepEqual(payload.columns, [
+      { id: "metric", label: "Показатель" },
+      { id: "today", label: "Текущий период" },
+      { id: "previous", label: "Сравнение" }
+    ]);
+    assert.equal(payload.rows.length, 33);
+    assert.deepEqual(payload.rows[0], {
+      metric: "Входящие обращения",
+      previous: 0,
+      today: 0
+    });
+    assert.deepEqual(payload.rows.find((row: Record<string, unknown>) => row.metric === "Медиана времени первого ответа"), {
+      metric: "Медиана времени первого ответа",
+      previous: null,
+      today: null
+    });
+    assert.equal(descriptor?.tenantId, "tenant-volga");
+    assert.equal(descriptor?.format, "JSON");
+    assert.equal(persisted?.statusKey, "ready");
+    assert.equal(persisted?.fileName, "export-worker-custom-json.json");
+    assert.equal(persisted?.rows, 33);
+  });
+
+  it("keeps a historically participating operator cohort in worker KPI aggregation after reassignment", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [], reportFileDescriptors: [] }));
+    repository.listSupportOperationsSourceRowsAsync = async () => [{
+      channel: "SDK",
+      createdAt: "2026-07-10T08:00:00.000Z",
+      id: "conversation-reassigned",
+      lifecycleEvents: [{
+        data: { toOperatorId: "operator-original" },
+        eventType: "assignment.changed",
+        id: "assignment-original",
+        occurredAt: "2026-07-10T08:01:00.000Z",
+        source: "routing"
+      }],
+      messages: [],
+      operatorId: "operator-current",
+      operatorName: "Current operator",
+      slaTone: "unknown",
+      status: "active",
+      topic: "Payments",
+      updatedAt: "2026-07-10T09:00:00.000Z"
+    } satisfies ConversationReportSourceRow];
+    repository.saveExportJob(reportExportJob({
+      columns: ["key", "current"],
+      createdAt: "2026-07-10T12:00:00.000Z",
+      filters: {
+        operatorId: "operator-original",
+        snapshotAt: "2026-07-10T12:00:00.000Z",
+        tenantId: "tenant-volga"
+      },
+      format: "JSON",
+      id: "export-worker-reassigned-operator",
+      period: "today",
+      queue: "report-export-reassigned-operator"
+    }));
+    const storage = createDeterministicReportObjectStorageAdapter();
+
+    const result = await executeReportExportWorkerOnce({
+      queue: "report-export-reassigned-operator",
+      reportRepository: repository,
+      storage
+    });
+    const object = storage.listObjects()[0];
+    const payload = JSON.parse(Buffer.isBuffer(object.body) ? object.body.toString("utf8") : object.body);
+
+    assert.deepEqual(result, { failed: 0, ready: 1, scanned: 1 });
+    assert.deepEqual(payload.rows.find((row: Record<string, unknown>) => row.key === "incoming"), {
+      current: 1,
+      key: "incoming"
+    });
+  });
+
+  it("materializes every support-ops/v2 KPI in CSV and keeps unavailable measurements empty", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({
+      exportJobs: [],
+      reportFileDescriptors: []
+    }));
+    repository.listSupportOperationsSourceRowsAsync = async () => [];
+    repository.saveExportJob(reportExportJob({
+      columns: ["key", "current", "workspaceVersion"],
+      createdAt: "2026-07-10T12:00:00.000Z",
+      filters: {
+        snapshotAt: "2026-07-10T12:00:00.000Z",
+        tenantId: "tenant-volga"
+      },
+      format: "CSV",
+      id: "export-worker-support-ops-csv",
+      period: "today",
+      queue: "report-export-support-ops-csv"
+    }));
+    const storage = createDeterministicReportObjectStorageAdapter();
+
+    const result = await executeReportExportWorkerOnce({
+      queue: "report-export-support-ops-csv",
+      reportRepository: repository,
+      storage
+    });
+    const object = storage.listObjects()[0];
+    const body = Buffer.isBuffer(object.body) ? object.body.toString("utf8") : object.body;
+    const lines = body.split("\r\n");
+
+    assert.deepEqual(result, { failed: 0, ready: 1, scanned: 1 });
+    assert.equal(lines.length, 34);
+    assert.equal(lines[0], "Ключ метрики,Текущее значение,Версия контракта");
+    assert.equal(lines.some((line) => line === "incoming,0,support-ops/v2"), true);
+    assert.equal(lines.some((line) => line === "firstResponseMedianSeconds,,support-ops/v2"), true);
+    assert.equal(repository.findReportFileDescriptor("export-worker-support-ops-csv")?.contentType, "text/csv");
+    assert.equal(repository.listExportJobs().find((job) => job.id === "export-worker-support-ops-csv")?.rows, 33);
   });
 
   it("regenerates a failed export after retry", async () => {
@@ -849,7 +1011,7 @@ describe("report export worker contracts", () => {
     await reportService.requestReportExport({
       columns: ["metric"],
       idempotencyKey: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-03",
-      period: "2026-07-03",
+      period: "today",
       reportType: "daily_support_digest"
     }, { tenantId: "tenant-volga" });
     const conflictRunning = repository.saveScheduledDigestDescriptor({

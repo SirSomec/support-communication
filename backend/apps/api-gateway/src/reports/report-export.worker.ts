@@ -3,8 +3,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { redactExportedDescriptor } from "@support-communication/envelope";
 import { ReportRepository, type ReportFileDescriptorRecord } from "./report.repository.js";
-import { buildLiveReportWorkspace, type LiveReportConversation, type LiveReportWorkspaceOptions } from "./report-live-workspace.js";
-import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
+import {
+  REPORT_COLUMN_OPTIONS,
+  REPORT_METRIC_DEFINITION_VERSION,
+  SUPPORT_OPERATIONS_METRIC_OPTIONS
+} from "./report-definition.js";
 import {
   buildConversationReportEventWatermark,
   filterReportConversations,
@@ -18,6 +21,11 @@ import {
   normalizeDialogTranscriptFormat
 } from "./report-dialog-transcripts.js";
 import type { ReportExportJob } from "./report.types.js";
+import {
+  buildSupportOperationsWorkspace,
+  type SupportOperationsWorkspace,
+  type SupportOperationsWorkspaceOptions
+} from "./support-operations-workspace.js";
 
 export interface ReportCsvColumn {
   id: string;
@@ -518,7 +526,7 @@ export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnc
         continue;
       }
 
-      if (job.format !== "CSV" && job.format !== "XLSX") {
+      if (job.format !== "CSV" && job.format !== "JSON" && job.format !== "XLSX") {
         throw new Error(`report_export_format_not_supported:${job.format}`);
       }
 
@@ -537,7 +545,9 @@ export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnc
       };
       const object = job.format === "CSV"
         ? await executeCsvReportExport(exportInput)
-        : await executeXlsxReportExport(exportInput);
+        : job.format === "JSON"
+          ? await executeJsonReportExport(exportInput)
+          : await executeXlsxReportExport(exportInput);
       const descriptor = await input.reportRepository.saveReportFileDescriptorAsync(toReportFileDescriptor({
         descriptor: object,
         fileName,
@@ -652,21 +662,29 @@ async function reportExportSnapshot(repository: ReportRepository, job: ReportExp
   rows: Array<Record<string, unknown>>;
 }> {
   const snapshotAt = reportSnapshotAt(job);
-  const options: LiveReportWorkspaceOptions = {
+  const options: SupportOperationsWorkspaceOptions = {
     channel: typeof job.filters?.channel === "string" ? job.filters.channel : undefined,
+    dateFrom: reportDateFilter(job.filters?.dateFrom),
+    dateTo: reportDateFilter(job.filters?.dateTo),
     now: snapshotAt,
-    period: job.period as LiveReportWorkspaceOptions["period"],
+    period: job.period as SupportOperationsWorkspaceOptions["period"],
+    topic: stringFilter(job.filters?.topic),
     timezoneOffsetMinutes: reportTimezoneOffset(job.filters?.timezoneOffsetMinutes)
   };
-  const emptyWorkspace = buildLiveReportWorkspace([], options);
-  const conversations = await repository.listConversationReportSourceRowsAsync({
-    from: new Date(emptyWorkspace.windows.previous.from),
+  const emptyWorkspace = buildSupportOperationsWorkspace([], options);
+  const conversations = await repository.listSupportOperationsSourceRowsAsync({
+    from: new Date(emptyWorkspace.period.previous.from),
+    snapshotAt,
     tenantId: reportExportTenantId(job),
-    to: new Date(Math.min(new Date(emptyWorkspace.windows.current.to).getTime(), snapshotAt.getTime()))
+    to: new Date(emptyWorkspace.period.current.to)
   });
   const snapshotConversations = conversations.map((conversation) => ({
     ...conversation,
-    lifecycleEvents: (conversation.lifecycleEvents ?? []).filter((event) => new Date(event.occurredAt).getTime() <= snapshotAt.getTime())
+    lifecycleEvents: (conversation.lifecycleEvents ?? []).filter((event) => new Date(event.occurredAt).getTime() <= snapshotAt.getTime()),
+    messages: conversation.messages.filter((message) => new Date(message.createdAt).getTime() <= snapshotAt.getTime()),
+    ...(conversation.rating && new Date(conversation.rating.createdAt).getTime() > snapshotAt.getTime()
+      ? { rating: undefined }
+      : {})
   }));
   const filteredConversations = filterReportConversations(snapshotConversations, {
     operatorId: stringFilter(job.filters?.operatorId),
@@ -677,22 +695,56 @@ async function reportExportSnapshot(repository: ReportRepository, job: ReportExp
     teamId: stringFilter(job.filters?.teamId),
     topic: stringFilter(job.filters?.topic)
   });
-  const workspace = buildLiveReportWorkspace(filteredConversations as LiveReportConversation[], options);
+  const workspace = buildSupportOperationsWorkspace(filteredConversations, options);
 
   return {
     eventWatermark: buildConversationReportEventWatermark(filteredConversations, snapshotAt),
-    rows: workspace.rows.map((row) => ({
-      delta: row.delta,
-      metric: row.metric,
-      previous: row.previous,
-      status: row.status,
-      today: row.current
-    }))
+    rows: supportOperationsExportRows(workspace)
   };
+}
+
+export function supportOperationsExportRows(workspace: SupportOperationsWorkspace): Array<Record<string, unknown>> {
+  const definitions = new Map(workspace.metricDefinitions.map((definition) => [definition.key, definition]));
+
+  return SUPPORT_OPERATIONS_METRIC_OPTIONS.map(({ key, label }) => {
+    const comparison = workspace.comparisons[key];
+    const definition = definitions.get(key);
+    const current = workspace.metrics.current[key];
+
+    return {
+      absoluteDelta: comparison.absolute,
+      caveats: definition?.caveats.join("; ") ?? "",
+      comparable: comparison.comparable,
+      current,
+      delta: comparison.percent,
+      formula: definition?.formula ?? "",
+      key,
+      metric: label,
+      percentDelta: comparison.percent,
+      previous: workspace.metrics.previous[key],
+      source: definition?.source.join("; ") ?? "",
+      status: comparison.comparable ? "Сопоставимо" : "Нет базы для сравнения",
+      today: current,
+      unit: definition?.unit ?? null,
+      workspaceVersion: workspace.version
+    };
+  });
 }
 
 function stringFilter(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function reportDateFilter(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error("report_export_date_filter_invalid");
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error("report_export_date_filter_invalid");
+  }
+  return value;
 }
 
 export function reportSnapshotAt(job: ReportExportJob): Date {
@@ -702,8 +754,12 @@ export function reportSnapshotAt(job: ReportExportJob): Date {
 }
 
 function reportTimezoneOffset(value: unknown): number {
-  const parsed = typeof value === "number" ? value : Number(value ?? 0);
-  return Number.isFinite(parsed) && Math.abs(parsed) <= 14 * 60 ? parsed : 0;
+  if (value === undefined || value === "") return 0;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || Math.abs(parsed) > 14 * 60) {
+    throw new Error("report_export_timezone_filter_invalid");
+  }
+  return parsed;
 }
 
 function reportExportTenantId(job: ReportExportJob): string {

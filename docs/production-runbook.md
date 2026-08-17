@@ -1,8 +1,8 @@
 # Production deployment runbook
 
-> **Статус на 2026-07-28 (аудит инфраструктуры): описанная ниже процедура — целевая (target) архитектура и НЕ развёрнута на текущем прод-сервере.**
+> **Актуальный статус на 2026-08-13:** production работает непосредственно на RUVDS (`supportcom.ru` → `194.87.206.159`). На хосте запущен production Docker Compose: Caddy edge, frontend, API Gateway, PostgreSQL, Redis, MinIO, ClamAV и воркеры. Проверка `https://supportcom.ru/api/v1/ready` через этот IP успешна; все зависимости API доступны. Реверс-SSH-туннель, `supportcom-api-bridge.service`/socat и Raspberry Pi не участвуют в текущем пути запроса.
 >
-> Фактически прод `supportcom.ru` (аналитика на `ea.supportcom.ru`) обслуживает Raspberry Pi (OpenMediaVault/Debian 12, публичный IP 95.31.2.38) по другой схеме:
+> **Историческая справка (аудит на 2026-07-28, заменённый текущей проверкой):** ранее прод `supportcom.ru` (аналитика на `ea.supportcom.ru`) обслуживал Raspberry Pi (OpenMediaVault/Debian 12, публичный IP `95.31.2.38`) по другой схеме:
 > - реверс-прокси и TLS — **nginx-proxy-manager** (собственный Let's Encrypt), **не Caddy** из `deploy/caddy/Caddyfile`;
 > - backend support-communication приходит на `127.0.0.1:4101` через **реверс-SSH-туннель (`ssh -R`) с удалённого хоста** (не с самого Pi), а `supportcom-api-bridge.service` (socat `172.17.0.1:4101 → 127.0.0.1:4101`) пробрасывает его в docker-сеть. Порт `4101` — конвенция из корневого `docker-compose.yml` (маппинг `4101:4100`);
 > - на сервере **нет** compose-проекта `compose.production.yml`, ~18 воркеров, ClamAV, каталога `/opt/support-communication`, файла `/etc/support-communication/production.env`, системного пользователя `support-communication` и самого Caddy;
@@ -10,7 +10,7 @@
 > - systemd-бэкап (`support-communication-backup.*`) **не установлен**, резервных копий данных продукта **нет вообще** (RPO = ∞); подробнее — `runtime-backup-and-recovery.md`;
 > - **алертинга нет** (postfix off, monit без почты и без слежения за продуктом, OMV email off, внешнего uptime-мониторинга нет): падение прода или проваленный бэкап никого не уведомляют.
 >
-> Всё, что описано ниже, — регламент для целевого развёртывания. Считать его планом, а не описанием текущего состояния сервера. Полный отчёт: [`infrastructure-audit-2026-07-28.md`](infrastructure-audit-2026-07-28.md).
+> Выводы в историческом блоке выше не описывают текущий прод. Полный снимок прежней инфраструктуры: [`infrastructure-audit-2026-07-28.md`](infrastructure-audit-2026-07-28.md).
 
 ## Scope
 
@@ -80,7 +80,7 @@ The local `bootstrap` service must never be run in production. Supply `BOOTSTRAP
 
 The API exposes Prometheus text internally at `/api/v1/metrics`. The public Caddy edge deliberately returns `404` for this path. A monitoring collector must scrape the API over the Docker network or another authenticated private path. Containers use bounded JSON-file logs; the host log collector should forward them to centralized storage with retention and secret-redaction rules.
 
-> **Статус на 2026-07-28 (аудит):** Caddy в бою не используется, поэтому фильтрация `/api/v1/metrics` на периметре **отсутствует** (трафик идёт через nginx-proxy-manager с дефолтами). Ни collector'а метрик, ни централизованного сбора логов на прод-сервере не развёрнуто; алертинг отсутствует.
+> **Проверено 2026-08-13:** Caddy — текущий production edge на RUVDS; внешний запрос к `/api/v1/metrics` возвращает `404` и получает CSP/HSTS-заголовки. Выводы аудита от 2026-07-28 о nginx-proxy-manager, сборе метрик и алертинге относятся к прежней инфраструктуре; актуальную наблюдаемость нужно проверять отдельно.
 
 ## Scheduled backups
 

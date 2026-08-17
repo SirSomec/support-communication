@@ -403,7 +403,7 @@ Host: supportcom.ru
    - robots/sitemap: короткий TTL;
    - 404: без длительного кэша.
 10. Сохранить существующие CSP и proxy-настройки.
-11. Проверить фактический nginx-proxy-manager: он должен передавать path без переписывания и не подменять content type.
+11. Проверить фактический Caddy edge на RUVDS: он должен передавать path без переписывания и не подменять content type.
 
 Затрагиваемые файлы:
 
@@ -617,8 +617,8 @@ Host: supportcom.ru
 1. Собрать immutable frontend image с release tag.
 2. Сохранить предыдущий рабочий image tag для rollback.
 3. Проверить release gate и targeted SEO tests.
-4. Проверить, какой frontend реально обслуживает `supportcom.ru`: production compose, удалённый host за reverse tunnel и nginx-proxy-manager.
-5. Проверить, что NPM не переписывает `/robots.txt`, `/sitemap.xml`, `/pricing/`, `/docs/`.
+4. Проверить, что `supportcom.ru` обслуживается напрямую RUVDS production Compose/Caddy: DNS должен указывать на RUVDS, а `/api/v1/ready` — отвечать без reverse-SSH-туннеля или nginx-proxy-manager.
+5. Проверить через Caddy, что `/robots.txt`, `/sitemap.xml`, `/pricing/` и `/docs/` отдаются без неожиданных rewrite или fallback.
 6. Согласовать короткое окно релиза.
 
 Порядок проверки после выкладки:

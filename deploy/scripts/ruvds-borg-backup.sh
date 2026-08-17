@@ -125,6 +125,9 @@ docker volume ls --format '{{.Name}}' \
   sha256sum -c manifest.sha256 >/dev/null
 )
 
+# Uptime Kuma is copied into staging above with SQLite's backup API.  Its live
+# volume is deliberately not archived too: the WAL can change during Borg's
+# walk and downgrade an otherwise valid backup to Borg's warning exit status.
 archive="$(hostname)-$(date +%Y-%m-%dT%H:%M:%S)"
 borg create \
   --show-rc \
@@ -147,8 +150,7 @@ borg create \
   /var/lib/docker/volumes/support-communication-infrastructure_redis-data \
   /var/lib/docker/volumes/support-communication-production_caddy-config \
   /var/lib/docker/volumes/support-communication-production_caddy-data \
-  /var/lib/docker/volumes/support-communication-production_netdata-config \
-  /var/lib/docker/volumes/support-communication-production_uptime-kuma-data
+  /var/lib/docker/volumes/support-communication-production_netdata-config
 
 printf '%s|%s\n' "$(date --iso-8601=seconds)" "${archive}" \
   >"${BACKUP_ROOT}/last-success"

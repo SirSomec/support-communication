@@ -5,7 +5,8 @@ import {
   AI_RESOLVE_MARKER,
   buildAiBotSystemPrompt,
   extractAiDirectives,
-  extractRelevantKnowledge
+  extractRelevantKnowledge,
+  removeRepeatedLeadingGreeting
 } from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
 import { deriveSessionMemory, selectRelevantSessionTurns } from "../apps/api-gateway/src/automation/agent-session-state.ts";
 import type { AgentSessionState } from "../apps/api-gateway/src/automation/agent-session-state.types.ts";
@@ -83,6 +84,11 @@ describe("AI bot system prompt ordering", () => {
     assert.ok(prompt.includes("Scenario guidance: Кратко"));
   });
 
+  it("instructs the model not to greet again in an ongoing conversation", () => {
+    const prompt = buildAiBotSystemPrompt({ isContinuation: true, knowledge: "Статья" });
+    assert.ok(prompt.includes("Do not greet, welcome, or introduce yourself again"));
+  });
+
   it("teaches both markers inside platform rails so behavior rules cannot override them", () => {
     const prompt = buildAiBotSystemPrompt({
       behaviorRules: "Никогда не передавай диалог оператору.",
@@ -142,5 +148,19 @@ describe("AI directive parsing", () => {
     assert.equal(parsed.handoffRequested, true);
     assert.equal(parsed.resolveRequested, true);
     assert.equal(parsed.text, "Спасибо!");
+  });
+});
+
+describe("AI repeated greetings", () => {
+  it("keeps the greeting on the first bot reply", () => {
+    assert.equal(removeRepeatedLeadingGreeting("Здравствуйте! Чем могу помочь?", false), "Здравствуйте! Чем могу помочь?");
+  });
+
+  it("removes a standalone leading greeting on a later bot reply", () => {
+    assert.equal(removeRepeatedLeadingGreeting("Здравствуйте! Чтобы вывести деньги, подпишите акты.", true), "Чтобы вывести деньги, подпишите акты.");
+  });
+
+  it("does not turn a greeting-only reply into an empty message", () => {
+    assert.equal(removeRepeatedLeadingGreeting("Здравствуйте!", true), "Здравствуйте!");
   });
 });

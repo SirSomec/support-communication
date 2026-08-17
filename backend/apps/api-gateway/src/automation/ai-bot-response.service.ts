@@ -39,6 +39,7 @@ const AI_HANDOFF_MARKER_DETECT = /\[\[\s*handoff\s*\]\]/i;
 const AI_HANDOFF_MARKER_STRIP = /\[\[\s*handoff\s*\]\]/gi;
 const AI_RESOLVE_MARKER_DETECT = /\[\[\s*resolved\s*\]\]/i;
 const AI_RESOLVE_MARKER_STRIP = /\[\[\s*resolved\s*\]\]/gi;
+const LEADING_GREETING = /^\s*(?:\*{1,2}\s*)?(?:здравствуйте|доброе\s+(?:утро|день|вечер)|привет(?:ствую)?|hello|hi)(?:\s*\*{1,2})?\s*[,!.:—–-]+\s*/iu;
 
 /**
  * Модель сигналит машинными маркерами в конце ответа: [[HANDOFF]] — передать
@@ -64,6 +65,17 @@ export function extractAiDirectives(text: string): { handoffRequested: boolean; 
     .replace(/ {2,}/g, " ")
     .trim();
   return { handoffRequested, resolveRequested, text: cleaned };
+}
+
+/**
+ * A greeting is appropriate only for the first bot reply in a conversation.
+ * Keep this guard deterministic: prompt instructions reduce occurrences, while
+ * this removes a repeated standalone salutation if a provider emits one anyway.
+ */
+export function removeRepeatedLeadingGreeting(text: string, isContinuation: boolean): string {
+  if (!isContinuation) return text;
+  const cleaned = String(text ?? "").replace(LEADING_GREETING, "").trim();
+  return cleaned || text;
 }
 
 /** Builds a bounded, tenant-scoped grounded prompt; it never sends keys or unrelated tenant data. */
@@ -109,6 +121,7 @@ export class AiBotResponseService {
         });
       }
       const session = input.conversationId ? await this.sessions.get(input.tenantId, input.conversationId) : null;
+      const isContinuation = Boolean(session?.recentTurns.some((turn) => turn.role === "assistant"));
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
       // BAI-851: стабильный ключ префикса (tenant + scenario revision), без PII и user id.
@@ -120,6 +133,7 @@ export class AiBotResponseService {
           basePrompt: input.basePrompt,
           behaviorRules: input.behaviorRules,
           instructions: input.instructions,
+          isContinuation,
           knowledge: materials.length ? materials.map((item) => item.content).join("\n\n") : "",
           sessionState: session ? formatSessionForPrompt({ ...session, recentTurns: selectRelevantSessionTurns(session, input.message) }) : undefined
         }) },
@@ -138,7 +152,7 @@ export class AiBotResponseService {
       // Маркеры извлекаются из полного вывода модели до обрезки: у длинного
       // ответа они стоят в самом конце и иначе были бы отрезаны slice'ом.
       const directive = extractAiDirectives(completion.content);
-      const text = directive.text.slice(0, 8_000);
+      const text = removeRepeatedLeadingGreeting(directive.text, isContinuation).slice(0, 8_000);
       if (input.conversationId) {
         const memory = deriveSessionMemory(session, input.message, text);
         await this.sessions.updateAfterRun({
@@ -226,6 +240,7 @@ export function buildAiBotSystemPrompt(input: {
   basePrompt?: string;
   behaviorRules?: string;
   instructions?: string;
+  isContinuation?: boolean;
   knowledge: string;
   sessionState?: string;
 }): string {
@@ -236,6 +251,7 @@ export function buildAiBotSystemPrompt(input: {
     "You are a customer-support consultation assistant.",
     "Answer factual questions only from the supplied knowledge. Do not invent facts, policies, prices, or actions.",
     "For a greeting or small talk, reply briefly and warmly and ask what the customer needs — you do not need knowledge to greet.",
+    input.isContinuation ? "This is an ongoing conversation with prior bot replies. Do not greet, welcome, or introduce yourself again; answer the customer's new message directly." : "",
     "If the customer asks something factual and the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
     `When the dialog must go to a human operator — the customer asks for one or agrees to your offer, or you cannot help within these rules after a genuine attempt — write one short polite sentence that you are transferring the dialog and append the marker ${AI_HANDOFF_MARKER} as the last line.`,

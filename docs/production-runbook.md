@@ -51,6 +51,24 @@ The preflight rejects placeholder values, local credentials, mutable image tags,
 
 ## Initial deployment
 
+### RUVDS
+
+On RUVDS, use the guarded deployment script. It validates both the application
+and complete runtime manifests, pulls the application images, runs migrations,
+and starts the application together with Uptime Kuma and Netdata:
+
+```bash
+PRODUCTION_ENV_FILE=/opt/support-communication/secrets/production.env \
+  deploy/scripts/ruvds-production-deploy.sh deploy
+```
+
+Do not run `up --remove-orphans` for the `support-communication-production`
+project without `compose.monitoring.yml`. Monitoring uses the same Compose
+project, so omitting that manifest causes Compose to delete Uptime Kuma and
+Netdata as orphans.
+
+### Portable production host
+
 1. Confirm that a fresh database backup exists when deploying into an existing environment.
 2. Pull the release images:
 
@@ -103,8 +121,10 @@ The offsite bucket must enforce encryption, versioning or object lock, retention
 2. Update all three image references to the same commit SHA.
 3. Run `production:config:check`.
 4. Create and verify a pre-release backup.
-5. Pull images and run the migration job.
-6. Recreate services with `docker compose up -d --remove-orphans`.
+5. On RUVDS, run `deploy/scripts/ruvds-production-deploy.sh deploy`; on another
+   host, pull images and run the migration job using its complete Compose file set.
+6. Never use `--remove-orphans` with only a subset of the manifests belonging to
+   the same Compose project.
 7. Run readiness and product smoke tests before closing the release window.
 
 ## Rollback

@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 
 const composePath = "deploy/compose/compose.production.yml";
 const exampleEnvPath = "deploy/env/production.env.example";
+const ruvdsDeployScriptPath = "deploy/scripts/ruvds-production-deploy.sh";
 
 describe("production deployment contract", () => {
   it("validates the standalone production compose schema", () => {
@@ -96,5 +97,15 @@ describe("production deployment contract", () => {
     assert.match(service, /NoNewPrivileges=true/);
     assert.match(timer, /OnCalendar=/);
     assert.match(timer, /Persistent=true/);
+  });
+
+  it("keeps RUVDS monitoring services in every remove-orphans deployment", () => {
+    const deployScript = readFileSync(ruvdsDeployScriptPath, "utf8");
+    const runbook = readFileSync("docs/production-runbook.md", "utf8");
+
+    assert.match(deployScript, /compose\.monitoring\.yml/);
+    assert.match(deployScript, /complete_runtime_compose up -d --remove-orphans/);
+    assert.doesNotMatch(deployScript, /application_compose up .*--remove-orphans/);
+    assert.match(runbook, /ruvds-production-deploy\.sh deploy/);
   });
 });

@@ -199,9 +199,11 @@ export interface SupportOperationsOperatorWorkload {
   agentTouches: number;
   assignedBacklog: number;
   firstResponseMedianSeconds: number | null;
+  identityStatus: "id_only" | "resolved" | "unattributed";
   internalComments: number;
   key: string;
   label: string;
+  operatorId: string | null;
   resolved: number;
   workloadSharePercent: number | null;
 }
@@ -271,6 +273,7 @@ interface ReportWindows {
 }
 
 interface NormalizedMessage {
+  actorType?: string;
   isBot: boolean;
   operatorId?: string;
   operatorName?: string;
@@ -282,6 +285,8 @@ interface NormalizedMessage {
 interface ResponseSample {
   durationSeconds: number;
   first: boolean;
+  operatorId?: string;
+  operatorName?: string;
   requestedAt: number;
   respondedAt: number;
 }
@@ -323,6 +328,10 @@ const CLOSED_STATUSES = new Set([
 ]);
 const BREACHED_SLA_TONES = new Set(["breach", "breached", "critical", "danger", "overdue", "violated"]);
 const ATTAINED_SLA_TONES = new Set(["healthy", "met", "normal", "ok", "success", "within"]);
+const IMPLICIT_SYSTEM_AUTHORS = new Set(["system", "система"]);
+const RESERVED_OPERATOR_LABELS = new Set(["operator", "оператор", ...IMPLICIT_SYSTEM_AUTHORS]);
+const UNATTRIBUTED_OPERATOR_KEY = "unattributed";
+const UNATTRIBUTED_OPERATOR_LABEL = "Неатрибутированные";
 
 const BACKLOG_AGE_RANGES: ReadonlyArray<Omit<SupportOperationsBacklogAgeBucket, "count" | "sharePercent">> = [
   { fromSeconds: 0, key: "under_4h", toSeconds: 4 * 3_600 },
@@ -392,7 +401,7 @@ function matchesText(value: string, filter: string | undefined): boolean {
 
 function toConversationFact(row: SupportOperationsConversationRow, diagnostics: SourceDiagnostics): ConversationFact {
   const lifecycle = normalizedLifecycle(row.lifecycleEvents ?? []);
-  const directMessages = normalizeDirectMessages(row.messages);
+  const directMessages = normalizeDirectMessages(row.messages, lifecycle);
   const lifecycleMessages = normalizeLifecycleMessages(lifecycle);
   const publicDirectMessages = directMessages.some((message) => message.type === "public");
   const messages = publicDirectMessages
@@ -445,11 +454,31 @@ function normalizedLifecycle(events: readonly SourceLifecycleEvent[]): Array<{ e
     .sort(byTimestamp);
 }
 
-function normalizeDirectMessages(messages: readonly SupportOperationsMessage[]): NormalizedMessage[] {
+interface MessageActorEvidence {
+  actorId?: string;
+  actorName?: string;
+  actorType?: string;
+  source?: string;
+}
+
+function normalizeDirectMessages(
+  messages: readonly SupportOperationsMessage[],
+  lifecycle: readonly { event: SourceLifecycleEvent; timestamp: number }[]
+): NormalizedMessage[] {
+  const lifecycleActors = lifecycleMessageActors(lifecycle);
   return messages
     .map((message): NormalizedMessage | undefined => {
       const timestamp = optionalTimestamp(message.createdAt);
       if (timestamp === undefined) return undefined;
+      const lifecycleActor = lifecycleActors.get(message.id);
+      const actorType = lifecycleActor?.actorType
+        ?? stringValue(message.actorType)
+        ?? stringValue(message.authorType)
+        ?? stringValue(message.senderType);
+      const actorId = lifecycleActor?.actorId
+        ?? stringValue(message.operatorId)
+        ?? stringValue(message.authorId);
+      const actorName = stringValue(message.author) ?? lifecycleActor?.actorName;
       const type = message.type === "internal"
         ? "internal"
         : message.type === "event"
@@ -458,9 +487,15 @@ function normalizeDirectMessages(messages: readonly SupportOperationsMessage[]):
             ? "csat_feedback"
             : "public";
       return {
-        isBot: explicitBotMarker(message as unknown as Record<string, unknown>),
-        ...(message.operatorId ?? message.authorId ? { operatorId: message.operatorId ?? message.authorId } : {}),
-        ...(message.author ? { operatorName: message.author } : {}),
+        ...(actorType ? { actorType } : {}),
+        isBot: explicitBotMarker({
+          ...(message as unknown as Record<string, unknown>),
+          ...(actorName ? { author: actorName } : {}),
+          ...(actorType ? { actorType } : {}),
+          ...(lifecycleActor?.source ? { source: lifecycleActor.source } : {})
+        }),
+        ...(actorId ? { operatorId: actorId } : {}),
+        ...(actorName ? { operatorName: actorName } : {}),
         side: message.side === "agent" || message.side === "client" ? message.side : "other",
         timestamp,
         type
@@ -468,6 +503,36 @@ function normalizeDirectMessages(messages: readonly SupportOperationsMessage[]):
     })
     .filter((message): message is NormalizedMessage => message !== undefined)
     .sort(byTimestamp);
+}
+
+function lifecycleMessageActors(
+  lifecycle: readonly { event: SourceLifecycleEvent; timestamp: number }[]
+): Map<string, MessageActorEvidence> {
+  const actors = new Map<string, MessageActorEvidence>();
+  for (const { event } of lifecycle) {
+    const eventType = normalizedEventType(event.eventType);
+    if (eventType !== "message.sent"
+      && eventType !== "internal.comment.created"
+      && eventType !== "comment.internal"
+      && eventType !== "message.internal") continue;
+    const messageId = stringValue(event.data?.messageId);
+    if (!messageId) continue;
+    actors.set(messageId, lifecycleActorEvidence(event));
+  }
+  return actors;
+}
+
+function lifecycleActorEvidence(event: SourceLifecycleEvent): MessageActorEvidence {
+  const data = event.data ?? {};
+  const actorId = stringValue(event.actorId) ?? stringValue(data.operatorId);
+  const actorName = stringValue(data.operatorName) ?? stringValue(event.actorName);
+  const actorType = stringValue(event.actorType) ?? stringValue(data.actorType);
+  return {
+    ...(actorId ? { actorId } : {}),
+    ...(actorName ? { actorName } : {}),
+    ...(actorType ? { actorType } : {}),
+    ...(event.source ? { source: event.source } : {})
+  };
 }
 
 function normalizeLifecycleMessages(
@@ -481,20 +546,24 @@ function normalizeLifecycleMessages(
     }
     if (eventType === "message.sent") {
       const internal = booleanValue(data.internal) || normalizeText(data.type) === "internal";
+      const actor = lifecycleActorEvidence(event);
       return [{
-        isBot: explicitBotMarker({ ...data, source: event.source }),
-        ...(stringValue(data.operatorId) ? { operatorId: stringValue(data.operatorId) } : {}),
-        ...(stringValue(data.operatorName) ? { operatorName: stringValue(data.operatorName) } : {}),
+        ...(actor.actorType ? { actorType: actor.actorType } : {}),
+        isBot: explicitBotMarker({ ...data, ...actor, author: actor.actorName, source: event.source }),
+        ...(actor.actorId ? { operatorId: actor.actorId } : {}),
+        ...(actor.actorName ? { operatorName: actor.actorName } : {}),
         side: "agent",
         timestamp,
         type: internal ? "internal" : "public"
       }];
     }
-    if (eventType === "comment.internal" || eventType === "message.internal") {
+    if (eventType === "internal.comment.created" || eventType === "comment.internal" || eventType === "message.internal") {
+      const actor = lifecycleActorEvidence(event);
       return [{
-        isBot: explicitBotMarker({ ...data, source: event.source }),
-        ...(stringValue(data.operatorId) ? { operatorId: stringValue(data.operatorId) } : {}),
-        ...(stringValue(data.operatorName) ? { operatorName: stringValue(data.operatorName) } : {}),
+        ...(actor.actorType ? { actorType: actor.actorType } : {}),
+        isBot: explicitBotMarker({ ...data, ...actor, author: actor.actorName, source: event.source }),
+        ...(actor.actorId ? { operatorId: actor.actorId } : {}),
+        ...(actor.actorName ? { operatorName: actor.actorName } : {}),
         side: "agent",
         timestamp,
         type: "internal"
@@ -514,10 +583,12 @@ function responseSamples(messages: readonly NormalizedMessage[]): ResponseSample
       pendingAt ??= message.timestamp;
       continue;
     }
-    if (message.side !== "agent" || message.isBot || pendingAt === undefined) continue;
+    if (message.side !== "agent" || !isEligibleHumanActor(message) || pendingAt === undefined) continue;
     samples.push({
       durationSeconds: Math.max(0, (message.timestamp - pendingAt) / 1_000),
       first: completedTurns === 0,
+      ...(message.operatorId ? { operatorId: message.operatorId } : {}),
+      ...(message.operatorName ? { operatorName: message.operatorName } : {}),
       requestedAt: pendingAt,
       respondedAt: message.timestamp
     });
@@ -612,7 +683,7 @@ function metricsForWindow(facts: readonly ConversationFact[], window: TimestampW
     from: window.from,
     incomingFacts,
     internalComments: facts.reduce((count, fact) => count + fact.messages.filter((message) =>
-      message.type === "internal" && !message.isBot && inWindow(message.timestamp, window)
+      message.type === "internal" && isEligibleHumanActor(message) && inWindow(message.timestamp, window)
     ).length, 0),
     nextResponses: facts.flatMap((fact) => fact.responses
       .filter((response) => !response.first && inWindow(response.requestedAt, window))
@@ -727,8 +798,17 @@ function metricsFromEvidence(evidence: WindowMetricEvidence): WindowMetricComput
 function humanAgentTouches(messages: readonly NormalizedMessage[], window: TimestampWindow): NormalizedMessage[] {
   return messages.filter((message) => message.type === "public"
     && message.side === "agent"
-    && !message.isBot
+    && isEligibleHumanActor(message)
     && inWindow(message.timestamp, window));
+}
+
+function isEligibleHumanActor(message: Pick<NormalizedMessage, "actorType" | "isBot" | "operatorId" | "operatorName">): boolean {
+  if (message.isBot) return false;
+  const actorType = normalizeText(message.actorType);
+  if (actorType !== "" && actorType !== "operator") return false;
+  return actorType === "operator"
+    || !!message.operatorId
+    || !IMPLICIT_SYSTEM_AUTHORS.has(normalizeText(message.operatorName));
 }
 
 function isBacklogAt(fact: ConversationFact, timestamp: number): boolean {
@@ -753,7 +833,7 @@ function isWaitingAt(fact: ConversationFact, timestamp: number): boolean {
   for (const message of fact.messages) {
     if (message.timestamp >= timestamp || message.type !== "public") continue;
     if (message.side === "client") waiting = true;
-    if (message.side === "agent" && !message.isBot) waiting = false;
+    if (message.side === "agent" && isEligibleHumanActor(message)) waiting = false;
   }
   return waiting;
 }
@@ -818,38 +898,44 @@ function categoricalBreakdown(
 }
 
 function operatorBreakdown(facts: readonly ConversationFact[], window: TimestampWindow): SupportOperationsOperatorWorkload[] {
-  const operators = new Map<string, { label: string; operatorId?: string }>();
-  for (const fact of facts) {
-    if (fact.operatorId || fact.operatorName) {
-      const key = fact.operatorId ?? `name:${normalizeText(fact.operatorName)}`;
-      operators.set(key, { label: fact.operatorName ?? fact.operatorId ?? "unassigned", ...(fact.operatorId ? { operatorId: fact.operatorId } : {}) });
-    }
-    for (const message of fact.messages) {
-      if ((message.side === "agent" || message.type === "internal") && !message.isBot && (message.operatorId || message.operatorName)) {
-        const key = message.operatorId ?? `name:${normalizeText(message.operatorName)}`;
-        operators.set(key, { label: message.operatorName ?? message.operatorId ?? "unassigned", ...(message.operatorId ? { operatorId: message.operatorId } : {}) });
-      }
-    }
-  }
-  const items = [...operators.entries()].map(([key, operator]) => {
-    const assignedFacts = facts.filter((fact) => operator.operatorId ? fact.operatorId === operator.operatorId : fact.operatorName === operator.label);
+  const identities = buildOperatorIdentityIndex(facts);
+  const keys = new Set(identities.byId.keys());
+  if (facts.some((fact) => (
+    resolveOperatorId(fact, identities) === null
+      && (isBacklogAt(fact, window.to) || fact.closeEvents.some((timestamp) => inWindow(timestamp, window)))
+  ) || fact.messages.some((message) =>
+    isEligibleHumanActor(message)
+      && (message.side === "agent" || message.type === "internal")
+      && resolveOperatorId(message, identities) === null
+  ))) keys.add(UNATTRIBUTED_OPERATOR_KEY);
+
+  const items = [...keys].map((key) => {
+    const operatorId = key === UNATTRIBUTED_OPERATOR_KEY ? null : key;
+    const identity = operatorId ? identities.byId.get(operatorId) : undefined;
+    const assignedFacts = facts.filter((fact) => resolveOperatorId(fact, identities) === operatorId);
     const touches = facts.flatMap((fact) => humanAgentTouches(fact.messages, window).filter((message) =>
-      operator.operatorId ? (message.operatorId ?? fact.operatorId) === operator.operatorId : (message.operatorName ?? fact.operatorName) === operator.label
+      resolveOperatorId(message, identities) === operatorId
     ));
     const internalComments = facts.reduce((count, fact) => count + fact.messages.filter((message) =>
-      message.type === "internal" && !message.isBot && inWindow(message.timestamp, window)
-      && (operator.operatorId ? (message.operatorId ?? fact.operatorId) === operator.operatorId : (message.operatorName ?? fact.operatorName) === operator.label)
+      message.type === "internal"
+      && isEligibleHumanActor(message)
+      && inWindow(message.timestamp, window)
+      && resolveOperatorId(message, identities) === operatorId
     ).length, 0);
-    const responseDurations = assignedFacts.flatMap((fact) => fact.responses
-      .filter((response) => response.first && inWindow(fact.startedAt, window))
+    const responseDurations = facts.flatMap((fact) => fact.responses
+      .filter((response) => response.first
+        && inWindow(fact.startedAt, window)
+        && resolveOperatorId(response, identities) === operatorId)
       .map((response) => response.durationSeconds));
     return {
       agentTouches: touches.length,
       assignedBacklog: assignedFacts.filter((fact) => isBacklogAt(fact, window.to)).length,
       firstResponseMedianSeconds: percentile(responseDurations, 0.5),
+      identityStatus: operatorId === null ? "unattributed" as const : identity?.hasDisplayName ? "resolved" as const : "id_only" as const,
       internalComments,
       key,
-      label: operator.label,
+      label: operatorId === null ? UNATTRIBUTED_OPERATOR_LABEL : identity?.label ?? operatorId,
+      operatorId,
       resolved: assignedFacts.filter((fact) => fact.closeEvents.some((timestamp) => inWindow(timestamp, window))).length,
       workloadSharePercent: null
     };
@@ -858,7 +944,78 @@ function operatorBreakdown(facts: readonly ConversationFact[], window: Timestamp
   return items.map((item) => ({
     ...item,
     workloadSharePercent: totalTouches === 0 ? null : percentage(item.agentTouches, totalTouches)
-  })).sort((left, right) => right.agentTouches - left.agentTouches || right.assignedBacklog - left.assignedBacklog || compareStrings(left.label, right.label));
+  })).sort((left, right) => right.agentTouches - left.agentTouches
+    || right.assignedBacklog - left.assignedBacklog
+    || compareStrings(left.label, right.label)
+    || compareStrings(left.key, right.key));
+}
+
+interface OperatorIdentityIndex {
+  byId: Map<string, { hasDisplayName: boolean; label: string; priority: number }>;
+  idsByName: Map<string, Set<string>>;
+}
+
+function buildOperatorIdentityIndex(facts: readonly ConversationFact[]): OperatorIdentityIndex {
+  const index: OperatorIdentityIndex = { byId: new Map(), idsByName: new Map() };
+  for (const fact of facts) {
+    if (fact.operatorId) registerOperatorIdentity(index, fact.operatorId, fact.operatorName, 2);
+  }
+  for (const fact of facts) {
+    for (const message of fact.messages) {
+      if (message.operatorId && isEligibleHumanActor(message)) {
+        registerOperatorIdentity(index, message.operatorId, message.operatorName, 1);
+      }
+    }
+  }
+  return index;
+}
+
+function registerOperatorIdentity(
+  index: OperatorIdentityIndex,
+  rawOperatorId: string,
+  rawOperatorName: string | undefined,
+  priority: number
+): void {
+  const operatorId = rawOperatorId.trim();
+  if (!operatorId) return;
+  const displayName = operatorDisplayName(rawOperatorName, operatorId);
+  const current = index.byId.get(operatorId);
+  if (!current) {
+    index.byId.set(operatorId, {
+      hasDisplayName: displayName !== undefined,
+      label: displayName ?? operatorId,
+      priority
+    });
+  } else if (displayName && (!current.hasDisplayName
+    || priority > current.priority
+    || (priority === current.priority && compareStrings(displayName, current.label) < 0))) {
+    index.byId.set(operatorId, { hasDisplayName: true, label: displayName, priority });
+  }
+  if (!displayName) return;
+  const alias = normalizeText(displayName);
+  const ids = index.idsByName.get(alias) ?? new Set<string>();
+  ids.add(operatorId);
+  index.idsByName.set(alias, ids);
+}
+
+function resolveOperatorId(
+  actor: { operatorId?: string; operatorName?: string },
+  index: OperatorIdentityIndex
+): string | null {
+  const operatorId = stringValue(actor.operatorId)?.trim();
+  if (operatorId) return operatorId;
+  const displayName = operatorDisplayName(actor.operatorName);
+  if (!displayName) return null;
+  const ids = index.idsByName.get(normalizeText(displayName));
+  return ids?.size === 1 ? [...ids][0]! : null;
+}
+
+function operatorDisplayName(value: string | undefined, operatorId?: string): string | undefined {
+  const displayName = stringValue(value)?.trim();
+  if (!displayName) return undefined;
+  const normalized = normalizeText(displayName);
+  if (RESERVED_OPERATOR_LABELS.has(normalized)) return undefined;
+  return operatorId && normalized === normalizeText(operatorId) ? undefined : displayName;
 }
 
 function buildTimeSeries(
@@ -972,7 +1129,7 @@ function addFactToKpiBuckets(fact: ConversationFact, buckets: KpiBucketAccumulat
   }
   for (const message of fact.messages) {
     const index = bucketIndexForTimestamp(buckets, message.timestamp);
-    if (index === -1 || message.isBot) continue;
+    if (index === -1 || !isEligibleHumanActor(message)) continue;
     if (message.type === "public" && message.side === "agent") buckets[index]!.agentTouches += 1;
     if (message.type === "internal") buckets[index]!.internalComments += 1;
   }
@@ -999,7 +1156,7 @@ function addFactSnapshotsToKpiBuckets(fact: ConversationFact, buckets: KpiBucket
     while (messageIndex < fact.messages.length && fact.messages[messageIndex]!.timestamp < bucket.to) {
       const message = fact.messages[messageIndex]!;
       if (message.type === "public" && message.side === "client") waiting = true;
-      if (message.type === "public" && message.side === "agent" && !message.isBot) waiting = false;
+      if (message.type === "public" && message.side === "agent" && isEligibleHumanActor(message)) waiting = false;
       messageIndex += 1;
     }
     const baselineClosed = !hasTransition

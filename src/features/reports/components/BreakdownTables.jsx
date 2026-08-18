@@ -59,16 +59,25 @@ export function BreakdownTables({ breakdowns, operatorId, routing }) {
           <table className="reports-data-table reports-operator-table">
             <caption className="sr-only">Операционная нагрузка команды</caption>
             <thead><tr><th scope="col">Оператор</th><th scope="col">Открыто</th><th scope="col">Решено</th><th scope="col">Касания</th><th scope="col">Первый ответ · P50</th><th scope="col"><ArrowDownUp aria-hidden="true" size={14} /> Передачи</th></tr></thead>
-            <tbody>{operators.map((row) => (
-              <tr key={row.id}>
-                <th scope="row"><span className="reports-avatar" aria-hidden="true">{initials(row.label)}</span>{row.label}</th>
-                <td>{formatCompactNumber(row.backlog)}</td>
-                <td>{formatCompactNumber(row.resolved)}</td>
-                <td>{formatCompactNumber(row.touches)}</td>
-                <td>{Number.isFinite(row.firstResponse) ? formatDurationSeconds(row.firstResponse) : "—"}</td>
-                <td>{Number.isFinite(row.transfers) ? formatCompactNumber(row.transfers) : "—"}</td>
-              </tr>
-            ))}</tbody>
+            <tbody>{operators.map((row, index) => {
+              const identityNoteId = row.identityDescription ? `reports-operator-identity-note-${index}` : undefined;
+              return (
+                <tr data-identity-status={row.identityStatus} data-operator-id={row.id} key={row.id}>
+                  <th scope="row">
+                    <span className="reports-avatar" aria-hidden="true">{row.identityStatus === "unattributed" ? "?" : initials(row.label)}</span>
+                    <span className="reports-operator-identity">
+                      <span aria-describedby={identityNoteId}>{row.label}</span>
+                      {row.identityDescription ? <small id={identityNoteId}>{row.identityDescription}</small> : null}
+                    </span>
+                  </th>
+                  <td>{formatCompactNumber(row.backlog)}</td>
+                  <td>{formatCompactNumber(row.resolved)}</td>
+                  <td>{formatCompactNumber(row.touches)}</td>
+                  <td>{Number.isFinite(row.firstResponse) ? formatDurationSeconds(row.firstResponse) : "—"}</td>
+                  <td>{Number.isFinite(row.transfers) ? formatCompactNumber(row.transfers) : "—"}</td>
+                </tr>
+              );
+            })}</tbody>
           </table>
           {!operators.length ? <div className="reports-inline-empty">Нет данных об операторской нагрузке за выбранный период.</div> : null}
         </div>

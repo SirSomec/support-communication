@@ -30,6 +30,9 @@ describe("support operations report repository", () => {
     ]);
     const activity = rows.find((row) => row.id === "conversation-activity");
     assert.deepEqual(activity?.lifecycleEvents, [{
+      actorId: "operator-anna",
+      actorName: "Anna",
+      actorType: "operator",
       data: { fromStatus: "active", resolutionOutcome: "resolved", toStatus: "closed" },
       eventType: "status.changed",
       id: "event-closed",
@@ -55,6 +58,11 @@ describe("support operations report repository", () => {
       occurredAt: { gte: from, lt: to },
       tenantId: "tenant-volga"
     });
+    assert.deepEqual({
+      actorId: calls.lifecycle[0]?.select.actorId,
+      actorName: calls.lifecycle[0]?.select.actorName,
+      actorType: calls.lifecycle[0]?.select.actorType
+    }, { actorId: true, actorName: true, actorType: true });
     assert.deepEqual(calls.conversation[0]?.where, {
       OR: [
         { createdAt: { gte: from, lt: to } },
@@ -277,6 +285,9 @@ function createSupportOperationsPrismaClient(): {
   ];
   const lifecycleEvents = [
     {
+      actorId: "operator-anna",
+      actorName: "Anna",
+      actorType: "operator",
       conversation: conversationRelation(conversations[1]!),
       conversationId: "conversation-activity",
       data: { fromStatus: "active", resolutionOutcome: "resolved", toStatus: "closed" },

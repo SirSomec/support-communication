@@ -227,6 +227,9 @@ export interface ConversationReportSourceRow {
   createdAt: string;
   id: string;
   lifecycleEvents?: Array<{
+    actorId?: string;
+    actorName?: string;
+    actorType?: string;
     data?: Record<string, unknown>;
     eventType: string;
     id?: string;
@@ -312,6 +315,9 @@ interface PrismaReportDataClient {
     findMany(input: {
       orderBy: { occurredAt: "asc" };
       select: {
+        actorId: true;
+        actorName: true;
+        actorType: true;
         conversation: { select: { channel: true; operatorId: true; operatorName: true; queueId: true; status: true; teamId: true; topic: true } };
         conversationId: true;
         data: true;
@@ -548,6 +554,9 @@ interface PrismaConversationFacetRow {
 }
 
 interface PrismaConversationLifecycleReportRow {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: string;
   conversation: {
     channel: string;
     operatorId: string | null;
@@ -881,6 +890,9 @@ export class ReportRepository {
       const events = await this.prismaClient.conversationLifecycleEvent.findMany({
         orderBy: { occurredAt: "asc" },
         select: {
+          actorId: true,
+          actorName: true,
+          actorType: true,
           conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
           conversationId: true,
           data: true,
@@ -913,6 +925,9 @@ export class ReportRepository {
           updatedAt: ""
         };
         current.lifecycleEvents!.push({
+          ...(event.actorId ? { actorId: event.actorId } : {}),
+          ...(event.actorName ? { actorName: event.actorName } : {}),
+          ...(event.actorType ? { actorType: event.actorType } : {}),
           ...(isRecord(event.data) ? { data: event.data } : {}),
           eventType: event.eventType,
           id: event.id,
@@ -992,6 +1007,9 @@ export class ReportRepository {
       ? await this.prismaClient.conversationLifecycleEvent.findMany({
           orderBy: { occurredAt: "asc" },
           select: {
+            actorId: true,
+            actorName: true,
+            actorType: true,
             conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
             conversationId: true,
             data: true,
@@ -1011,6 +1029,9 @@ export class ReportRepository {
     for (const event of lifecycleRows) {
       const events = lifecycleByConversation.get(event.conversationId) ?? [];
       events.push({
+        ...(event.actorId ? { actorId: event.actorId } : {}),
+        ...(event.actorName ? { actorName: event.actorName } : {}),
+        ...(event.actorType ? { actorType: event.actorType } : {}),
         ...(isRecord(event.data) ? { data: event.data } : {}),
         eventType: event.eventType,
         id: event.id,
@@ -1056,6 +1077,9 @@ export class ReportRepository {
       ? await this.prismaClient.conversationLifecycleEvent.findMany({
           orderBy: { occurredAt: "asc" },
           select: {
+            actorId: true,
+            actorName: true,
+            actorType: true,
             conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
             conversationId: true,
             data: true,
@@ -1296,6 +1320,9 @@ export class ReportRepository {
         ? this.prismaClient.conversationLifecycleEvent.findMany({
             orderBy: { occurredAt: "asc" },
             select: {
+              actorId: true,
+              actorName: true,
+              actorType: true,
               conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
               conversationId: true,
               data: true,
@@ -1317,6 +1344,9 @@ export class ReportRepository {
     for (const event of routingFacetHistoryRows) {
       const events = facetHistoryByConversation.get(event.conversationId) ?? [];
       events.push({
+        ...(event.actorId ? { actorId: event.actorId } : {}),
+        ...(event.actorName ? { actorName: event.actorName } : {}),
+        ...(event.actorType ? { actorType: event.actorType } : {}),
         ...(isRecord(event.data) ? { data: event.data } : {}),
         eventType: event.eventType,
         id: event.id,

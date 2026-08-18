@@ -35,6 +35,70 @@ describe("current-query routing breakdown consistency", () => {
     assert.equal(rows.find((row) => row.id === "operator-outside-slice")?.transfers, 11);
   });
 
+  it("uses operatorId before legacy key/id and merges routing evidence only by the exact canonical id", () => {
+    const rows = mergeReportOperatorRows([
+      {
+        agentTouches: 4,
+        assignedBacklog: 0,
+        id: "legacy-id",
+        key: "name:анна-соколова",
+        operatorId: "operator-canonical",
+        operatorName: "Анна Соколова",
+        resolved: 3
+      }
+    ], [
+      { operatorId: "operator-canonical", transferEvents: 2 }
+    ]);
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "operator-canonical");
+    assert.equal(rows[0].backlog, 0, "a measured zero remains authoritative");
+    assert.equal(rows[0].touches, 4);
+    assert.equal(rows[0].transfers, 2);
+  });
+
+  it("keeps production-shaped name-only workload separate because labels cannot prove identity overlap", () => {
+    const rows = mergeReportOperatorRows([
+      { agentTouches: 3, assignedBacklog: 1, key: "operator-1", label: "Анна", resolved: 2 },
+      { agentTouches: 7, assignedBacklog: 4, key: "name:анна", label: "Анна", resolved: 5 }
+    ], [
+      { operatorId: "operator-1", transferEvents: 2 }
+    ]);
+
+    assert.deepEqual(rows.map((row) => row.id).sort(), ["name:анна", "operator-1"]);
+    assert.equal(rows.find((row) => row.id === "operator-1")?.touches, 3);
+    assert.equal(rows.find((row) => row.id === "operator-1")?.transfers, 2);
+    assert.equal(rows.find((row) => row.id === "name:анна")?.touches, 7);
+    assert.equal(rows.find((row) => row.id === "name:анна")?.identityStatus, "name-only");
+  });
+
+  it("preserves distinct canonical ids even when operators have the same normalized label", () => {
+    const rows = mergeReportOperatorRows([
+      { agentTouches: 3, assignedBacklog: 1, key: "operator-a", label: "Анна", resolved: 2 },
+      { agentTouches: 5, assignedBacklog: 2, key: "operator-b", label: " анна ", resolved: 4 }
+    ], []);
+
+    assert.deepEqual(rows.map((row) => row.id).sort(), ["operator-a", "operator-b"]);
+    assert.deepEqual(rows.map((row) => row.touches).sort((a, b) => a - b), [3, 5]);
+  });
+
+  it("renders every explicit unattributed identity consistently instead of presenting it as an employee", () => {
+    const placeholder = mergeReportOperatorRows([
+      { agentTouches: 1, assignedBacklog: 1, identityStatus: "unattributed", key: "unattributed:1", label: "Operator" }
+    ], [])[0];
+    const backendUnattributed = mergeReportOperatorRows([
+      { agentTouches: 2, identityStatus: "unattributed", key: "unattributed", label: "Неатрибутированные", operatorId: null }
+    ], [])[0];
+
+    assert.equal(placeholder.identityStatus, "unattributed");
+    assert.equal(placeholder.label, "Без атрибуции");
+    assert.match(placeholder.identityDescription, /Источник не подтвердил личность/);
+    assert.equal(backendUnattributed.label, "Без атрибуции");
+    assert.match(breakdownSource, /row\.identityStatus === "unattributed" \? "\?" : initials\(row\.label\)/);
+    assert.match(breakdownSource, /aria-describedby=\{identityNoteId\}/);
+    assert.match(breakdownSource, /data-identity-status=\{row\.identityStatus\}/);
+  });
+
   it("applies selectedOperatorId after merging current-query workload and routing evidence", () => {
     const rows = mergeReportOperatorRows(workloadRows, routingRows, {
       selectedOperatorId: "operator-outside-slice"

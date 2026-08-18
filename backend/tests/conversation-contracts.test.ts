@@ -311,6 +311,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     });
     assert.equal(internal.status, "ok");
     assert.equal(internal.data.message.type, "internal");
+    assert.equal(internal.data.message.author, "Система");
     assert.match(String(internal.data.message.createdAt), /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(internal.data.outboundDelivery, null);
     assert.equal(internal.data.auditEvent.action, "message.internal_note.create");
@@ -322,6 +323,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     });
     assert.equal(reply.status, "ok");
     assert.equal(reply.data.message.side, "agent");
+    assert.equal(reply.data.message.author, "Система");
     assert.match(String(reply.data.message.createdAt), /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(reply.data.outboundDelivery.deliveryState, "queued");
     assert.equal(reply.data.outboundDelivery.channel, "SDK");

@@ -437,6 +437,13 @@ test("reports workspace exposes accessible KPI, trend, filter and export control
   const commandBar = page.getByRole("region", { name: "Параметры отчета" });
   await expect(commandBar).toBeVisible();
   await expect(page.getByRole("region", { name: "Ключевые показатели" })).toBeVisible();
+  const operatorTable = page.getByRole("table", { name: "Операционная нагрузка команды" });
+  await expect(operatorTable).toBeVisible();
+  const operatorIds = await operatorTable.locator("tbody tr").evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-operator-id")).filter(Boolean)
+  );
+  expect(new Set(operatorIds).size).toBe(operatorIds.length);
+  await expect(operatorTable.getByRole("rowheader", { name: /^(Operator|Оператор)$/ })).toHaveCount(0);
 
   const period = page.getByLabel("Период отчета");
   await period.focus();

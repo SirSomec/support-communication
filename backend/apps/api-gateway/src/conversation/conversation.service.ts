@@ -1555,7 +1555,14 @@ export class ConversationService {
         return operatorName;
       }
     }
-    return scope.actorName?.trim() || actorId || "Operator";
+    const actorName = scope.actorName?.trim();
+    if (actorName) {
+      return actorName;
+    }
+    if (actorId && (scope.actorType === "operator" || scope.actorType === "service_admin")) {
+      return actorId;
+    }
+    return "Система";
   }
 
   async fetchAttachmentUploadStatus(fileId: string, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {

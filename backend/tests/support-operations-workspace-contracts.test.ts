@@ -213,6 +213,215 @@ describe("support operations workspace v2 contracts", () => {
     assert.deepEqual(latestDay.metrics.waiting, { samples: 5, value: 5 });
   });
 
+  it("canonicalizes a unique legacy name without duplicate workload and conserves operator totals", () => {
+    const rows = [
+      sourceRow("canonical-closed", "2026-08-18T08:00:00.000Z", {
+        lifecycleEvents: [event("status.changed", "2026-08-18T09:00:00.000Z", { toStatus: "closed" })],
+        messages: [
+          message("closed-client", "2026-08-18T08:00:00.000Z", "client"),
+          message("closed-agent", "2026-08-18T08:01:00.000Z", "agent", { author: "Alex" }),
+          message("closed-note", "2026-08-18T08:02:00.000Z", "agent", { author: "Alex", type: "internal" })
+        ],
+        operatorId: "operator-1",
+        operatorName: "Alex",
+        status: "closed",
+        updatedAt: "2026-08-18T09:00:00.000Z"
+      }),
+      sourceRow("canonical-backlog", "2026-08-18T10:00:00.000Z", {
+        messages: [
+          message("backlog-client", "2026-08-18T10:00:00.000Z", "client"),
+          message("backlog-agent", "2026-08-18T10:01:00.000Z", "agent", { author: "Alex" })
+        ],
+        operatorId: "operator-1",
+        operatorName: "Alex"
+      }),
+      sourceRow("canonical-name-only-owner", "2026-08-18T11:00:00.000Z", {
+        messages: [],
+        operatorName: "Alex"
+      })
+    ];
+
+    const workspace = buildSupportOperationsWorkspace(rows, { now: NOW, period: "today" });
+    const [operator] = workspace.breakdowns.operators;
+
+    assert.deepEqual(workspace.breakdowns.operators.map((item) => item.key), ["operator-1"]);
+    assert.deepEqual(operator, {
+      agentTouches: 2,
+      assignedBacklog: 2,
+      firstResponseMedianSeconds: 60,
+      identityStatus: "resolved",
+      internalComments: 1,
+      key: "operator-1",
+      label: "Alex",
+      operatorId: "operator-1",
+      resolved: 1,
+      workloadSharePercent: 100
+    });
+    assertOperatorConservation(workspace);
+    assert.equal(workspace.breakdowns.operators.some((item) => item.key.startsWith("name:")), false);
+  });
+
+  it("joins direct messages to lifecycle actors and excludes every non-operator principal from human KPIs", () => {
+    const actorTypes = ["system", "worker", "service_admin", "client"] as const;
+    const rows = actorTypes.map((actorType, index) => {
+      const minute = String(index * 10).padStart(2, "0");
+      const responseMinute = String(index * 10 + 1).padStart(2, "0");
+      const messageId = `non-human-${actorType}`;
+      return sourceRow(`actor-${actorType}`, `2026-08-18T08:${minute}:00.000Z`, {
+        lifecycleEvents: [actorEvent("message.sent", `2026-08-18T08:${responseMinute}:00.000Z`, { messageId }, {
+          actorId: `${actorType}-1`,
+          actorName: actorType === "system" ? "Operator" : actorType,
+          actorType
+        })],
+        messages: [
+          message(`client-${actorType}`, `2026-08-18T08:${minute}:00.000Z`, "client"),
+          message(messageId, `2026-08-18T08:${responseMinute}:00.000Z`, "agent", {
+            author: actorType === "system" ? "Operator" : actorType
+          })
+        ],
+        operatorId: "operator-1",
+        operatorName: "Alex"
+      });
+    });
+    rows.push(sourceRow("system-internal", "2026-08-18T09:00:00.000Z", {
+      lifecycleEvents: [actorEvent("internal_comment.created", "2026-08-18T09:01:00.000Z", { messageId: "system-note" }, {
+        actorType: "system"
+      })],
+      messages: [
+        message("system-note-client", "2026-08-18T09:00:00.000Z", "client"),
+        message("system-note", "2026-08-18T09:01:00.000Z", "agent", { author: "Operator", type: "internal" })
+      ],
+      operatorId: "operator-1",
+      operatorName: "Alex"
+    }));
+    rows.push(sourceRow("direct-system-fallback", "2026-08-18T09:10:00.000Z", {
+      messages: [
+        message("direct-system-client", "2026-08-18T09:10:00.000Z", "client"),
+        message("direct-system-agent", "2026-08-18T09:11:00.000Z", "agent", { author: "Система" })
+      ],
+      operatorId: "operator-1",
+      operatorName: "Alex"
+    }));
+
+    const workspace = buildSupportOperationsWorkspace(rows, { now: NOW, period: "today" });
+
+    assert.equal(workspace.metrics.current.agentTouches, 0);
+    assert.equal(workspace.metrics.current.internalComments, 0);
+    assert.equal(workspace.metrics.current.firstResponseSamples, 0);
+    assert.equal(workspace.metrics.current.waiting, rows.length);
+    assert.deepEqual(workspace.breakdowns.operators.map((item) => [item.key, item.agentTouches]), [["operator-1", 0]]);
+    assert.equal(workspace.breakdowns.operators.some((item) => /operator|оператор|система|system/i.test(item.label)), false);
+  });
+
+  it("keeps legacy Operator and Оператор activity in one stable unattributed row without exposing the placeholder", () => {
+    const rows = [
+      ["legacy-operator-en", "Operator", "08:00:00", "08:01:00"],
+      ["legacy-operator-ru", "Оператор", "09:00:00", "09:01:00"]
+    ].map(([id, author, clientTime, agentTime]) => sourceRow(id!, `2026-08-18T${clientTime}.000Z`, {
+      messages: [
+        message(`${id}-client`, `2026-08-18T${clientTime}.000Z`, "client"),
+        message(`${id}-agent`, `2026-08-18T${agentTime}.000Z`, "agent", { author })
+      ]
+    }));
+
+    const workspace = buildSupportOperationsWorkspace(rows, { now: NOW, period: "today" });
+
+    assert.deepEqual(workspace.breakdowns.operators, [{
+      agentTouches: 2,
+      assignedBacklog: 2,
+      firstResponseMedianSeconds: 60,
+      identityStatus: "unattributed",
+      internalComments: 0,
+      key: "unattributed",
+      label: "Неатрибутированные",
+      operatorId: null,
+      resolved: 0,
+      workloadSharePercent: 100
+    }]);
+    assert.equal(JSON.stringify(workspace.breakdowns.operators).includes("Operator"), false);
+    assert.equal(JSON.stringify(workspace.breakdowns.operators).includes("Оператор"), false);
+    assertOperatorConservation(workspace);
+  });
+
+  it("keeps an ambiguous shared name unattributed while preserving each canonical owner", () => {
+    const rows = [
+      sourceRow("same-name-one", "2026-08-18T08:00:00.000Z", {
+        operatorId: "operator-1",
+        operatorName: "Alex"
+      }),
+      sourceRow("same-name-two", "2026-08-18T08:30:00.000Z", {
+        lifecycleEvents: [event("status.changed", "2026-08-18T09:30:00.000Z", { toStatus: "closed" })],
+        operatorId: "operator-2",
+        operatorName: "Alex",
+        status: "closed",
+        updatedAt: "2026-08-18T09:30:00.000Z"
+      }),
+      sourceRow("same-name-legacy", "2026-08-18T10:00:00.000Z", {
+        messages: [
+          message("same-name-client", "2026-08-18T10:00:00.000Z", "client"),
+          message("same-name-agent", "2026-08-18T10:01:00.000Z", "agent", { author: "Alex" })
+        ],
+        operatorName: "Alex"
+      }),
+      sourceRow("same-name-empty-backlog", "2026-08-18T10:30:00.000Z", {
+        messages: [],
+        operatorName: "Alex"
+      }),
+      sourceRow("same-name-empty-closed", "2026-08-18T10:45:00.000Z", {
+        lifecycleEvents: [event("status.changed", "2026-08-18T11:30:00.000Z", { toStatus: "closed" })],
+        messages: [],
+        operatorName: "Alex",
+        status: "closed",
+        updatedAt: "2026-08-18T11:30:00.000Z"
+      })
+    ];
+
+    const workspace = buildSupportOperationsWorkspace(rows, { now: NOW, period: "today" });
+    const byKey = new Map(workspace.breakdowns.operators.map((item) => [item.key, item]));
+
+    assert.equal(byKey.get("operator-1")?.assignedBacklog, 1);
+    assert.equal(byKey.get("operator-2")?.resolved, 1);
+    assert.equal(byKey.get("unattributed")?.assignedBacklog, 2);
+    assert.equal(byKey.get("unattributed")?.resolved, 1);
+    assert.equal(byKey.get("unattributed")?.agentTouches, 1);
+    assert.equal(byKey.get("unattributed")?.firstResponseMedianSeconds, 60);
+    assert.equal(byKey.get("operator-1")?.agentTouches, 0);
+    assert.equal(byKey.get("operator-2")?.agentTouches, 0);
+    assertOperatorConservation(workspace);
+  });
+
+  it("attributes a lifecycle-backed response actor instead of the conversation current owner", () => {
+    const rows = [
+      sourceRow("alex-identity", "2026-08-18T08:00:00.000Z", {
+        operatorId: "operator-alex",
+        operatorName: "Alex"
+      }),
+      sourceRow("reassigned-to-berta", "2026-08-18T09:00:00.000Z", {
+        lifecycleEvents: [actorEvent("message.sent", "2026-08-18T09:01:00.000Z", { messageId: "reassigned-agent" }, {
+          actorId: "operator-alex",
+          actorName: "operator-alex",
+          actorType: "operator"
+        })],
+        messages: [
+          message("reassigned-client", "2026-08-18T09:00:00.000Z", "client"),
+          message("reassigned-agent", "2026-08-18T09:01:00.000Z", "agent", { author: "Alex" })
+        ],
+        operatorId: "operator-berta",
+        operatorName: "Berta"
+      })
+    ];
+
+    const workspace = buildSupportOperationsWorkspace(rows, { now: NOW, period: "today" });
+    const byKey = new Map(workspace.breakdowns.operators.map((item) => [item.key, item]));
+
+    assert.equal(byKey.get("operator-alex")?.agentTouches, 1);
+    assert.equal(byKey.get("operator-alex")?.firstResponseMedianSeconds, 60);
+    assert.equal(byKey.get("operator-berta")?.agentTouches, 0);
+    assert.equal(byKey.get("operator-berta")?.firstResponseMedianSeconds, null);
+    assert.equal(byKey.get("operator-berta")?.assignedBacklog, 1);
+    assertOperatorConservation(workspace);
+  });
+
   it("uses tenant-local date boundaries and daily buckets for short custom ranges", () => {
     const rows = [
       sourceRow("current-edge", "2026-06-30T21:00:00.000Z"),
@@ -523,6 +732,21 @@ function resolvedWithRating(id: string, score: number, scale: string): SupportOp
   });
 }
 
+function assertOperatorConservation(workspace: ReturnType<typeof buildSupportOperationsWorkspace>): void {
+  const totals = workspace.breakdowns.operators.reduce((sum, operator) => ({
+    agentTouches: sum.agentTouches + operator.agentTouches,
+    assignedBacklog: sum.assignedBacklog + operator.assignedBacklog,
+    internalComments: sum.internalComments + operator.internalComments,
+    resolved: sum.resolved + operator.resolved
+  }), { agentTouches: 0, assignedBacklog: 0, internalComments: 0, resolved: 0 });
+  assert.deepEqual(totals, {
+    agentTouches: workspace.metrics.current.agentTouches,
+    assignedBacklog: workspace.metrics.current.backlog,
+    internalComments: workspace.metrics.current.internalComments,
+    resolved: workspace.metrics.current.resolved
+  });
+}
+
 function sourceRow(
   id: string,
   createdAt: string,
@@ -564,4 +788,14 @@ function event(
   source?: string
 ): NonNullable<SupportOperationsConversationRow["lifecycleEvents"]>[number] {
   return { data, eventType, occurredAt, ...(source ? { source } : {}) };
+}
+
+function actorEvent(
+  eventType: string,
+  occurredAt: string,
+  data: Record<string, unknown>,
+  actor: Pick<NonNullable<SupportOperationsConversationRow["lifecycleEvents"]>[number], "actorType"> &
+    Partial<Pick<NonNullable<SupportOperationsConversationRow["lifecycleEvents"]>[number], "actorId" | "actorName">>
+): NonNullable<SupportOperationsConversationRow["lifecycleEvents"]>[number] {
+  return { ...event(eventType, occurredAt, data, "conversation-service"), ...actor };
 }

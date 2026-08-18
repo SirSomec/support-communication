@@ -9,6 +9,7 @@ const trendChartSource = readFileSync(new URL("../src/features/reports/component
 const workspaceHookSource = readFileSync(new URL("../src/features/reports/hooks/useReportWorkspace.js", import.meta.url), "utf8");
 const routingHookSource = readFileSync(new URL("../src/features/reports/hooks/useRoutingActivity.js", import.meta.url), "utf8");
 const reportsScreenSource = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
+const reportsCssSource = readFileSync(new URL("../src/features/reports/reports.css", import.meta.url), "utf8");
 
 describe("report filter component contracts", () => {
   it("keeps period, comparison, refresh, filters and export as accessible command-bar controls", () => {
@@ -41,16 +42,32 @@ describe("report filter component contracts", () => {
     }
   });
 
-  it("renders every trend series with a readable summary and exact tabular fallback", () => {
-    assert.match(trendChartSource, /timeSeries\.series\.map/);
-    assert.match(trendChartSource, /<polyline/);
+  it("offers URL-backed KPI and grain controls with an accessible chart and exact tabular fallback", () => {
+    assert.match(trendChartSource, /aria-label="Показатель графика"/);
+    assert.match(trendChartSource, /aria-label="Периодичность"/);
+    assert.match(trendChartSource, /REPORT_TREND_GRAIN_OPTIONS\.map/);
+    assert.match(trendChartSource, /metricOptions\.map/);
+    assert.match(trendChartSource, /onSelectionChange/);
+    assert.match(trendChartSource, /aria-labelledby=/);
     assert.match(trendChartSource, /role="img"/);
-    assert.match(trendChartSource, /role="status"/);
+    assert.match(trendChartSource, /tabIndex="0"/);
+    assert.match(trendChartSource, /ArrowLeft/);
+    assert.match(trendChartSource, /ArrowRight/);
+    assert.match(trendChartSource, /aria-live="polite"/);
     assert.match(trendChartSource, /Табличные данные графика/);
-    for (const heading of ["Период", "Входящие", "Решено", "Бэклог"]) {
-      assert.match(trendChartSource, new RegExp(`<th scope="col">${heading}</th>`));
-    }
-    assert.doesNotMatch(trendChartSource, /return\s+18|Math\.max\(18/, "zero values must stay on the zero baseline");
+    assert.match(trendChartSource, /<th scope="col">Период<\/th>/);
+    assert.match(trendChartSource, /chart\.series\.map\(\(series\) => <th/);
+    assert.match(trendChartSource, /formatChartValue\(row\.values\[series\.key\]/);
+    assert.match(trendChartSource, /row\.samples\[series\.key\]/);
+    assert.match(trendChartSource, /if \(!Number\.isFinite\(value\)\) return "—"/);
+    assert.match(trendChartSource, /contiguousSegments/);
+
+    assert.match(reportsScreenSource, /explorer=\{operations\.trendExplorer\}/);
+    assert.match(reportsScreenSource, /selection=\{view\.trend\}/);
+    assert.match(reportsScreenSource, /onSelectionChange=\{\(trend\) => setView/);
+    assert.doesNotMatch(workspaceHookSource, /view\.trend/, "presentation-only chart changes must not trigger a workspace refetch");
+    assert.doesNotMatch(routingHookSource, /view\.trend/, "presentation-only chart changes must not restart routing activity");
+    assert.match(reportsCssSource, /@media\s*\(max-width:[^)]+\)[\s\S]*?\.reports-trend-toolbar\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
   });
 
   it("keeps unavailable hero KPIs visible and explains why they cannot be calculated", () => {

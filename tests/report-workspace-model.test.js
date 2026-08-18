@@ -12,7 +12,10 @@ import {
   validateReportView
 } from "../src/features/reports/model/reportViewState.js";
 import { formatReportMetric } from "../src/features/reports/model/reportMetricRegistry.js";
-import { normalizeReportWorkspace } from "../src/features/reports/model/reportWorkspaceModel.js";
+import {
+  normalizeReportWorkspace,
+  selectTrendExplorerView
+} from "../src/features/reports/model/reportWorkspaceModel.js";
 
 describe("reports view state", () => {
   it("sends an identical custom window and timezone to workspace and routing queries", () => {
@@ -94,6 +97,8 @@ describe("reports view state", () => {
     assert.equal(persisted.searchParams.get("reportCompare"), "0");
     assert.equal(persisted.searchParams.get("reportFrom"), "2026-08-01");
     assert.equal(persisted.searchParams.get("reportTo"), "2026-08-18");
+    assert.equal(persisted.searchParams.get("reportTrendMetric"), "volume");
+    assert.equal(persisted.searchParams.get("reportTrendGrain"), "day");
     assert.equal(persisted.searchParams.get("report_channel"), "MAX");
     assert.equal(persisted.searchParams.get("report_queueId"), "queue-priority");
     assert.equal(persisted.searchParams.get("report_topic"), "VIP");
@@ -101,6 +106,43 @@ describe("reports view state", () => {
     assert.equal(persisted.hash, "#/app");
 
     assert.deepEqual(reportViewFromLocation(persisted, new Date("2026-08-18T12:00:00Z")), view);
+  });
+
+  it("persists and restores the selected KPI trend while rejecting unsupported URL values", () => {
+    const location = new URL("https://support.example.test/app?keep=1#/app");
+    const history = { state: null, replaceState(_state, _title, nextUrl) { this.nextUrl = nextUrl; } };
+    const view = {
+      ...createDefaultReportView(new Date("2026-08-18T12:00:00Z")),
+      trend: { grain: "month", metric: "csatAverage" }
+    };
+
+    persistReportView(view, history, location);
+
+    const persisted = new URL(history.nextUrl, location.origin);
+    assert.equal(persisted.searchParams.get("reportTrendMetric"), "csatAverage");
+    assert.equal(persisted.searchParams.get("reportTrendGrain"), "month");
+    assert.deepEqual(
+      reportViewFromLocation(persisted, new Date("2026-08-18T12:00:00Z")).trend,
+      { grain: "month", metric: "csatAverage" }
+    );
+    const defaultTrendView = { ...view, trend: { grain: "day", metric: "volume" } };
+    assert.deepEqual(
+      reportWorkspaceQuery(view),
+      reportWorkspaceQuery(defaultTrendView),
+      "switching the client-side chart must not refetch the report workspace"
+    );
+    assert.deepEqual(
+      reportRoutingQuery(view),
+      reportRoutingQuery(defaultTrendView),
+      "switching the chart must not restart unrelated routing activity"
+    );
+
+    const unsupported = new URL("https://support.example.test/app?reportTrendMetric=made-up&reportTrendGrain=quarter#/app");
+    assert.deepEqual(
+      reportViewFromLocation(unsupported, new Date("2026-08-18T12:00:00Z")).trend,
+      { grain: "day", metric: "volume" },
+      "unknown share-link values must fail closed to the documented defaults"
+    );
   });
 
   it("removes obsolete custom dates for a preset period", () => {
@@ -138,6 +180,111 @@ describe("reports view state", () => {
 });
 
 describe("support-ops/v2 workspace normalization", () => {
+  it("selects day, week and month KPI trends without turning missing samples into zero", () => {
+    const point = (from, to, metrics) => ({ from, metrics, to });
+    const workspace = normalizeReportWorkspace({
+      operations: {
+        metrics: {
+          current: {
+            csatAverage: 4.5,
+            csatSamples: 4,
+            csatScaleMaximum: 5,
+            incoming: 3,
+            resolved: 2
+          }
+        },
+        period: { timezoneOffsetMinutes: 180 },
+        timeSeries: {
+          current: [],
+          granularity: "day",
+          kpi: {
+            availableGrains: ["day", "week", "month"],
+            byGrain: {
+              day: {
+                current: [
+                  point("2026-08-16T21:00:00.000Z", "2026-08-17T21:00:00.000Z", {
+                    firstResponseP50Seconds: { samples: 0, value: null },
+                    firstResponseP90Seconds: { samples: 0, value: null },
+                    incoming: { samples: 0, value: 0 },
+                    resolved: { samples: 0, value: 0 }
+                  }),
+                  point("2026-08-17T21:00:00.000Z", "2026-08-18T21:00:00.000Z", {
+                    firstResponseP50Seconds: { samples: 1, value: 0 },
+                    firstResponseP90Seconds: { samples: 1, value: 120 },
+                    incoming: { samples: 3, value: 3 },
+                    resolved: { samples: 2, value: 2 }
+                  })
+                ],
+                previous: []
+              },
+              week: {
+                current: [point("2026-08-02T21:00:00.000Z", "2026-08-09T21:00:00.000Z", {
+                  incoming: { samples: 7, value: 7 },
+                  resolved: { samples: 6, value: 6 }
+                })],
+                previous: []
+              },
+              month: {
+                current: [
+                  point("2026-06-30T21:00:00.000Z", "2026-07-31T21:00:00.000Z", {
+                    csatAverage: { samples: 0, value: null }
+                  }),
+                  point("2026-07-31T21:00:00.000Z", "2026-08-31T21:00:00.000Z", {
+                    csatAverage: { samples: 4, scaleMaximum: 5, value: 4.5 }
+                  })
+                ],
+                previous: []
+              }
+            }
+          },
+          previous: []
+        },
+        version: "support-ops/v2"
+      }
+    });
+    const explorer = workspace.operations.trendExplorer;
+
+    assert.deepEqual(explorer.availableGrains, ["day", "week", "month"]);
+    assert.deepEqual(explorer.metricOptions.map(({ key }) => key), [
+      "volume",
+      "queueHealth",
+      "firstResponse",
+      "nextResponse",
+      "resolution",
+      "fullResolution",
+      "slaAttainment",
+      "csatAverage",
+      "csatPositiveRate",
+      "csatCoverage",
+      "responseCoverage",
+      "reopenRate",
+      "oneTouchRate",
+      "workload"
+    ]);
+
+    const responseTrend = selectTrendExplorerView(explorer, { grain: "day", metric: "firstResponse" });
+    assert.equal(responseTrend.title, "Время первого ответа");
+    assert.deepEqual(responseTrend.series.map(({ key }) => key), ["firstResponseMedianSeconds", "firstResponseP90Seconds"]);
+    assert.deepEqual(responseTrend.series[0].values, [null, 0], "a real zero-duration sample must remain distinct from unavailable data");
+    assert.deepEqual(responseTrend.series[0].samples, [0, 1]);
+    assert.match(responseTrend.rows[1].label, /18.*авг/i, "day labels use the report timezone");
+
+    const weeklyVolume = selectTrendExplorerView(explorer, { grain: "week", metric: "volume" });
+    assert.match(weeklyVolume.rows[0].label, /3.*авг.*9.*авг/i, "ISO-week labels expose the local Monday-to-Sunday bucket");
+
+    const monthlyCsat = selectTrendExplorerView(explorer, { grain: "month", metric: "csatAverage" });
+    assert.deepEqual(monthlyCsat.domain, { max: 5, min: 0 });
+    assert.deepEqual(monthlyCsat.series[0].values, [null, 4.5]);
+    assert.deepEqual(monthlyCsat.series[0].samples, [0, 4]);
+    assert.equal(monthlyCsat.rows[1].metrics.csatAverage.scaleMaximum, 5, "CSAT scale evidence survives normalization");
+    assert.match(monthlyCsat.rows[1].label, /авг.*2026/i, "month labels use local calendar months");
+
+    const invalid = selectTrendExplorerView(explorer, { grain: "quarter", metric: "made-up" });
+    assert.equal(invalid.grain, "day");
+    assert.equal(invalid.metric, "volume");
+    assert.deepEqual(invalid.series.map(({ key }) => key), ["incoming", "resolved", "backlog"], "the default chart preserves all three legacy series");
+  });
+
   it("preserves operational diagnostic values and their measurement evidence", () => {
     const workspace = normalizeReportWorkspace({
       operations: {

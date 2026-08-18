@@ -448,20 +448,81 @@ test("reports workspace exposes accessible KPI, trend, filter and export control
   await expect.poll(() => page.url()).toContain("reportFrom=2026-08-01");
   await expect.poll(() => page.url()).toContain("reportTo=2026-08-18");
 
-  const trendChart = page.getByRole("img", { name: /График динамики обращений/ });
-  const emptyTrend = page.getByText("Нет событий для построения динамики за выбранный период.", { exact: true });
-  await expect.poll(async () => await trendChart.count() + await emptyTrend.count()).toBe(1);
-  if (await trendChart.count()) {
-    await expect(trendChart).toBeVisible();
-    await page.getByText("Табличные данные графика", { exact: true }).click();
-    const trendTable = page.getByRole("table", { name: "Динамика обращений" });
-    await expect(trendTable).toBeVisible();
-    for (const heading of ["Период", "Входящие", "Решено", "Бэклог"]) {
-      await expect(trendTable.getByRole("columnheader", { name: heading })).toBeVisible();
-    }
-  } else {
-    await expect(emptyTrend).toBeVisible();
+  const trendFigure = page.locator(".reports-trend-figure");
+  const trendMetric = page.getByLabel("Показатель графика");
+  const trendGrain = page.getByLabel("Периодичность");
+  await expect(trendMetric).toBeVisible();
+  await expect(trendGrain).toBeVisible();
+  await expect(trendMetric).toHaveValue("volume");
+  await expect(trendGrain).toHaveValue("day");
+  for (const option of ["Обращения", "Время первого ответа", "Время решения", "CSAT", "SLA без нарушения", "Переоткрытия"]) {
+    await expect(trendMetric.getByRole("option", { name: option, exact: true })).toBeAttached();
   }
+  for (const option of ["По дням", "По неделям", "По месяцам"]) {
+    await expect(trendGrain.getByRole("option", { name: option, exact: true })).toBeAttached();
+  }
+
+  const defaultTrendChart = page.getByRole("img", { name: /График «Динамика обращений»/ });
+  await expect(defaultTrendChart).toBeVisible();
+  await trendFigure.getByText("Табличные данные графика", { exact: true }).click();
+  const defaultTrendTable = page.getByRole("table", { name: /Динамика обращений по периодам/ });
+  await expect(defaultTrendTable).toBeVisible();
+  for (const heading of ["Период", "Входящие", "Решено", "Бэклог"]) {
+    await expect(defaultTrendTable.getByRole("columnheader", { name: heading, exact: true })).toBeVisible();
+  }
+
+  let workspaceRequestsAfterTrendChange = 0;
+  const countWorkspaceRequest = (request) => {
+    if (request.url().includes("/api/v1/reports/workspace")) workspaceRequestsAfterTrendChange += 1;
+  };
+  page.on("request", countWorkspaceRequest);
+  await trendMetric.selectOption("firstResponse");
+  await trendGrain.selectOption("week");
+  await expect.poll(() => page.url()).toContain("reportTrendMetric=firstResponse");
+  await expect.poll(() => page.url()).toContain("reportTrendGrain=week");
+  await expect(trendFigure.getByText("Время первого ответа", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("table", { name: /Время первого ответа по периодам, по неделям/i })).toBeVisible();
+  for (const heading of ["Период", "P50", "P90"]) {
+    await expect(page.getByRole("table", { name: /Время первого ответа по периодам/i }).getByRole("columnheader", { name: heading, exact: true })).toBeVisible();
+  }
+  await page.waitForTimeout(250);
+  page.off("request", countWorkspaceRequest);
+  expect(workspaceRequestsAfterTrendChange).toBe(0);
+
+  const responseChart = page.getByRole("img", { name: /График «Время первого ответа», по неделям/i });
+  const emptyResponseTrend = trendFigure.getByText(/Нет измеримых значений для показателя «Время первого ответа»/);
+  await expect.poll(async () => await responseChart.count() + await emptyResponseTrend.count()).toBe(1);
+  if (await responseChart.count()) {
+    await responseChart.focus();
+    await expect(responseChart).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(trendFigure.locator(".reports-chart-navigation [aria-live='polite']")).toContainText(/^1 из /);
+  }
+
+  await trendMetric.selectOption("csatAverage");
+  await trendGrain.selectOption("month");
+  await expect.poll(() => page.url()).toContain("reportTrendMetric=csatAverage");
+  await expect.poll(() => page.url()).toContain("reportTrendGrain=month");
+  await expect(trendFigure.getByText("CSAT", { exact: true }).first()).toBeVisible();
+  const csatTable = page.getByRole("table", { name: /CSAT по периодам, по месяцам/i });
+  await expect(csatTable).toBeVisible();
+  await expect(csatTable.getByRole("columnheader", { name: "CSAT", exact: true })).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
+  await selectRole(page, "Администратор");
+  await openSection(page, "Отчеты");
+  await expect(page.getByLabel("Показатель графика")).toHaveValue("csatAverage");
+  await expect(page.getByLabel("Периодичность")).toHaveValue("month");
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  const mobileMetricBox = await page.getByLabel("Показатель графика").boundingBox();
+  const mobileGrainBox = await page.getByLabel("Периодичность").boundingBox();
+  expect(mobileMetricBox?.height).toBeGreaterThanOrEqual(44);
+  expect(mobileGrainBox?.height).toBeGreaterThanOrEqual(44);
+  expect(mobileGrainBox?.y).toBeGreaterThan(mobileMetricBox?.y ?? 0);
+  await expectHealthyPage(page);
+  await page.setViewportSize({ height: 720, width: 1280 });
 
   await page.getByRole("button", { name: /Фильтры/ }).click();
   const filterDialog = page.getByRole("dialog", { name: "Фильтры отчета" });

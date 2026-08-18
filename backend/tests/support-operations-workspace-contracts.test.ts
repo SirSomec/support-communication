@@ -208,6 +208,9 @@ describe("support operations workspace v2 contracts", () => {
     assert.deepEqual(workspace.breakdowns.channels.map((item) => [item.key, item.backlog]), [["sdk", 4], ["telegram", 2]]);
     assert.deepEqual(workspace.breakdowns.topics.map((item) => [item.key, item.backlog]), [["payment", 3], ["delivery", 3]]);
     assert.deepEqual(workspace.breakdowns.operators.map((item) => [item.key, item.assignedBacklog]), [["operator-1", 5], ["operator-2", 1]]);
+    const latestDay = workspace.timeSeries.kpi.byGrain.day.current.at(-1)!;
+    assert.deepEqual(latestDay.metrics.backlog, { samples: 6, value: 6 });
+    assert.deepEqual(latestDay.metrics.waiting, { samples: 5, value: 5 });
   });
 
   it("uses tenant-local date boundaries and daily buckets for short custom ranges", () => {
@@ -258,6 +261,122 @@ describe("support operations workspace v2 contracts", () => {
     assert.equal(workspace.timeSeries.current.at(-1)?.to, workspace.period.current.to);
   });
 
+  it("exposes day, ISO-week and calendar-month KPI buckets on tenant-local boundaries", () => {
+    const workspace = buildSupportOperationsWorkspace([], {
+      dateFrom: "2026-07-30",
+      dateTo: "2026-08-05",
+      now: NOW,
+      period: "custom",
+      timezoneOffsetMinutes: 180
+    });
+    const kpi = workspace.timeSeries.kpi;
+
+    assert.deepEqual(kpi.availableGrains, ["day", "week", "month"]);
+    assert.equal(kpi.byGrain.day.current.length, 7);
+    assert.deepEqual([kpi.byGrain.day.current[0]!.from, kpi.byGrain.day.current[0]!.to], [
+      "2026-07-29T21:00:00.000Z",
+      "2026-07-30T21:00:00.000Z"
+    ]);
+    assert.deepEqual(kpi.byGrain.week.current.map(({ from, to }) => [from, to]), [
+      ["2026-07-29T21:00:00.000Z", "2026-08-02T21:00:00.000Z"],
+      ["2026-08-02T21:00:00.000Z", "2026-08-05T21:00:00.000Z"]
+    ]);
+    assert.deepEqual(kpi.byGrain.month.current.map(({ from, to }) => [from, to]), [
+      ["2026-07-29T21:00:00.000Z", "2026-07-31T21:00:00.000Z"],
+      ["2026-07-31T21:00:00.000Z", "2026-08-05T21:00:00.000Z"]
+    ]);
+    assert.deepEqual(kpi.byGrain.week.previous.map(({ from, to }) => [from, to]), [
+      ["2026-07-22T21:00:00.000Z", "2026-07-26T21:00:00.000Z"],
+      ["2026-07-26T21:00:00.000Z", "2026-07-29T21:00:00.000Z"]
+    ]);
+  });
+
+  it("recomputes KPI bucket percentiles, scores and rates from raw evidence with honest samples", () => {
+    const responseSeconds = [10, 100, 300, null] as const;
+    const resolutionSeconds = [600, 1_200, 2_400, 4_800] as const;
+    const starts = [
+      "2026-07-27T06:00:00.000Z",
+      "2026-07-28T06:00:00.000Z",
+      "2026-07-28T07:00:00.000Z",
+      "2026-07-28T08:00:00.000Z"
+    ];
+    const rows = starts.map((startedAt, index): SupportOperationsConversationRow => {
+      const closedAt = new Date(Date.parse(startedAt) + resolutionSeconds[index]! * 1_000).toISOString();
+      const lifecycleEvents = [
+        event(index === 2 ? "sla.overdue" : "sla.met", new Date(Date.parse(startedAt) + 5_000).toISOString()),
+        event("status.changed", closedAt, { toStatus: "resolved" }),
+        ...(index === 2
+          ? [event("status.changed", new Date(Date.parse(closedAt) + 60_000).toISOString(), { fromStatus: "resolved", toStatus: "active" })]
+          : [])
+      ];
+      return sourceRow(`raw-${index}`, startedAt, {
+        lifecycleEvents: index === 3 ? lifecycleEvents.slice(1) : lifecycleEvents,
+        messages: responseSeconds[index] === null ? [message("client", startedAt, "client")] : responseMessages(startedAt, responseSeconds[index]!),
+        ...(index < 3
+          ? { rating: { createdAt: new Date(Date.parse(closedAt) + 10_000).toISOString(), scale: "1-5", score: index === 0 ? 1 : 5 } }
+          : {}),
+        slaTone: index === 3 ? "unknown" : "ok",
+        status: index === 2 ? "active" : "resolved",
+        updatedAt: closedAt
+      });
+    });
+    const workspace = buildSupportOperationsWorkspace(rows, {
+      dateFrom: "2026-07-27",
+      dateTo: "2026-08-02",
+      now: NOW,
+      period: "custom",
+      timezoneOffsetMinutes: 180
+    });
+    const days = workspace.timeSeries.kpi.byGrain.day.current;
+    const week = workspace.timeSeries.kpi.byGrain.week.current[0]!;
+
+    assert.equal(days[0]!.metrics.firstResponseP50Seconds.value, 10);
+    assert.equal(days[1]!.metrics.firstResponseP50Seconds.value, 200);
+    assert.deepEqual(week.metrics.firstResponseP50Seconds, { samples: 3, value: 100 });
+    assert.deepEqual(week.metrics.firstResponseP90Seconds, { samples: 3, value: 260 });
+    assert.deepEqual(week.metrics.firstResolutionP50Seconds, { samples: 4, value: 1_800 });
+    assert.deepEqual(week.metrics.firstResolutionP90Seconds, { samples: 4, value: 4_080 });
+    assert.deepEqual(week.metrics.firstResponseCoveragePercent, { samples: 4, value: 75 });
+    assert.deepEqual(week.metrics.responseCoveragePercent, { samples: 4, value: 75 });
+    assert.deepEqual(week.metrics.csatAverage, { samples: 3, scaleMaximum: 5, value: 3.7 });
+    assert.deepEqual(week.metrics.csatCoveragePercent, { samples: 4, value: 75 });
+    assert.deepEqual(week.metrics.csatPositiveRatePercent, { samples: 3, value: 66.7 });
+    assert.deepEqual(week.metrics.slaAttainmentPercent, { samples: 3, value: 66.7 });
+    assert.deepEqual(week.metrics.reopenRatePercent, { samples: 4, value: 25 });
+    assert.deepEqual(week.metrics.oneTouchResolutionPercent, { samples: 4, value: 50 });
+    assert.deepEqual(week.metrics.incoming, { samples: 4, value: 4 });
+    assert.deepEqual(week.metrics.resolved, { samples: 4, value: 4 });
+
+    const emptyWeek = workspace.timeSeries.kpi.byGrain.week.previous[0]!;
+    assert.deepEqual(emptyWeek.metrics.firstResponseP50Seconds, { samples: 0, value: null });
+    assert.deepEqual(emptyWeek.metrics.csatAverage, { samples: 0, scaleMaximum: null, value: null });
+    assert.deepEqual(emptyWeek.metrics.firstResponseCoveragePercent, { samples: 0, value: null });
+    assert.deepEqual(emptyWeek.metrics.incoming, { samples: 0, value: 0 });
+  });
+
+  it("attributes first-resolution duration only to the bucket containing the first close", () => {
+    const row = sourceRow("reclose", "2026-07-27T06:00:00.000Z", {
+      lifecycleEvents: [
+        event("status.changed", "2026-07-27T07:00:00.000Z", { toStatus: "resolved" }),
+        event("status.changed", "2026-07-27T08:00:00.000Z", { fromStatus: "resolved", toStatus: "active" }),
+        event("status.changed", "2026-07-28T07:00:00.000Z", { toStatus: "resolved" })
+      ],
+      status: "resolved",
+      updatedAt: "2026-07-28T07:00:00.000Z"
+    });
+    const days = buildSupportOperationsWorkspace([row], {
+      dateFrom: "2026-07-27",
+      dateTo: "2026-07-28",
+      now: NOW,
+      period: "custom",
+      timezoneOffsetMinutes: 180
+    }).timeSeries.kpi.byGrain.day.current;
+
+    assert.deepEqual(days[0]!.metrics.firstResolutionP50Seconds, { samples: 1, value: 3_600 });
+    assert.deepEqual(days[1]!.metrics.firstResolutionP50Seconds, { samples: 0, value: null });
+    assert.equal(days[1]!.metrics.resolved.value, 1);
+  });
+
   it("rejects invalid periods, timezones, impossible dates, future starts and excessive custom ranges", () => {
     assert.throws(() => buildSupportOperationsWorkspace([], { now: NOW, period: "quarter" as "today" }), /Unsupported/);
     assert.throws(() => buildSupportOperationsWorkspace([], { now: NOW, timezoneOffsetMinutes: 841 }), /timezoneOffsetMinutes/);
@@ -276,18 +395,28 @@ describe("support operations workspace v2 contracts", () => {
     const rows = [
       resolvedWithRating("five", 5, "1-5"),
       resolvedWithRating("ten", 10, "0-10"),
+      resolvedWithRating("unknown", 3, "custom"),
       resolvedWithRating("invalid", 7, "1-5")
     ];
     const workspace = buildSupportOperationsWorkspace(rows, { now: NOW });
     const metrics = workspace.metrics.current;
 
-    assert.equal(metrics.resolved, 3);
-    assert.equal(metrics.csatSamples, 2);
-    assert.equal(metrics.csatCoveragePercent, 66.7);
+    assert.equal(metrics.resolved, 4);
+    assert.equal(metrics.csatSamples, 3);
+    assert.equal(metrics.csatCoveragePercent, 75);
     assert.equal(metrics.csatAverage, null);
     assert.equal(metrics.csatScaleMaximum, null);
     assert.equal(metrics.csatPositiveRatePercent, 100);
     assert.equal(workspace.source.invalidRatings, 1);
+    assert.deepEqual(workspace.timeSeries.kpi.byGrain.day.current[0]!.metrics.csatAverage, {
+      samples: 3,
+      scaleMaximum: null,
+      value: null
+    });
+    assert.deepEqual(workspace.timeSeries.kpi.byGrain.day.current[0]!.metrics.csatPositiveRatePercent, {
+      samples: 2,
+      value: 100
+    });
   });
 
   it("selects the latest valid CSAT rating independently at each comparison cutoff", () => {

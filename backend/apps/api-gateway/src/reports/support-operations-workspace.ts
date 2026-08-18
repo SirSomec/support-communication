@@ -108,11 +108,71 @@ export interface SupportOperationsTimeSeriesPoint {
   waiting: number;
 }
 
+export type SupportOperationsKpiTimeSeriesGrain = "day" | "week" | "month";
+
+export interface SupportOperationsKpiTimeSeriesMetric {
+  /**
+   * Evidence behind the value: measured observations for durations and scores,
+   * the denominator for rates, and the value itself for counts and snapshots.
+   */
+  samples: number;
+  /** Common CSAT scale maximum; present only for csatAverage. */
+  scaleMaximum?: number | null;
+  value: number | null;
+}
+
+export interface SupportOperationsKpiTimeSeriesPoint {
+  from: string;
+  metrics: {
+    agentTouches: SupportOperationsKpiTimeSeriesMetric;
+    backlog: SupportOperationsKpiTimeSeriesMetric;
+    csatAverage: SupportOperationsKpiTimeSeriesMetric;
+    csatCoveragePercent: SupportOperationsKpiTimeSeriesMetric;
+    csatPositiveRatePercent: SupportOperationsKpiTimeSeriesMetric;
+    firstResolutionP50Seconds: SupportOperationsKpiTimeSeriesMetric;
+    firstResolutionP90Seconds: SupportOperationsKpiTimeSeriesMetric;
+    firstResponseCoveragePercent: SupportOperationsKpiTimeSeriesMetric;
+    firstResponseP50Seconds: SupportOperationsKpiTimeSeriesMetric;
+    firstResponseP90Seconds: SupportOperationsKpiTimeSeriesMetric;
+    fullResolutionP50Seconds: SupportOperationsKpiTimeSeriesMetric;
+    fullResolutionP90Seconds: SupportOperationsKpiTimeSeriesMetric;
+    incoming: SupportOperationsKpiTimeSeriesMetric;
+    internalComments: SupportOperationsKpiTimeSeriesMetric;
+    nextResponseP50Seconds: SupportOperationsKpiTimeSeriesMetric;
+    nextResponseP90Seconds: SupportOperationsKpiTimeSeriesMetric;
+    oneTouchResolutionPercent: SupportOperationsKpiTimeSeriesMetric;
+    reopenRatePercent: SupportOperationsKpiTimeSeriesMetric;
+    resolved: SupportOperationsKpiTimeSeriesMetric;
+    responseCoveragePercent: SupportOperationsKpiTimeSeriesMetric;
+    slaAttainmentPercent: SupportOperationsKpiTimeSeriesMetric;
+    slaBreaches: SupportOperationsKpiTimeSeriesMetric;
+    waiting: SupportOperationsKpiTimeSeriesMetric;
+  };
+  to: string;
+}
+
+export interface SupportOperationsKpiTimeSeriesWindow {
+  current: SupportOperationsKpiTimeSeriesPoint[];
+  previous: SupportOperationsKpiTimeSeriesPoint[];
+}
+
+/**
+ * Calendar buckets in the report timezone. Weeks start on Monday; the first
+ * and last bucket are clipped to the selected comparison window. Every bucket
+ * is calculated from source conversation/message facts, never rolled up from
+ * another grain's percentile or rate.
+ */
+export interface SupportOperationsKpiTimeSeries {
+  availableGrains: SupportOperationsKpiTimeSeriesGrain[];
+  byGrain: Record<SupportOperationsKpiTimeSeriesGrain, SupportOperationsKpiTimeSeriesWindow>;
+}
+
 export interface SupportOperationsTimeSeries {
   aggregated: boolean;
   aggregationReason: "custom_range_exceeds_93_days" | null;
   current: SupportOperationsTimeSeriesPoint[];
   granularity: "hour" | "day" | "week";
+  kpi: SupportOperationsKpiTimeSeries;
   previous: SupportOperationsTimeSeriesPoint[];
 }
 
@@ -287,7 +347,7 @@ export function buildSupportOperationsWorkspace(
   const current = metricsForWindow(facts, windows.current);
   const previous = metricsForWindow(facts, windows.previous);
   const breakdowns = buildBreakdowns(facts, windows.current);
-  const timeSeries = buildTimeSeries(facts, period, windows);
+  const timeSeries = buildTimeSeries(facts, period, windows, timezoneOffsetMinutes);
 
   return {
     backlogAge: buildBacklogAge(facts, windows.current.to),
@@ -545,81 +605,122 @@ function metricsForWindow(facts: readonly ConversationFact[], window: TimestampW
   const incomingFacts = facts.filter((fact) => inWindow(fact.startedAt, window));
   const resolvedFacts = facts.filter((fact) => fact.closeEvents.some((timestamp) => inWindow(timestamp, window)));
   const backlogFacts = facts.filter((fact) => isBacklogAt(fact, window.to));
+  return metricsFromEvidence({
+    agentTouches: facts.reduce((count, fact) => count + humanAgentTouches(fact.messages, window).length, 0),
+    asOf: window.to,
+    backlog: backlogFacts.length,
+    from: window.from,
+    incomingFacts,
+    internalComments: facts.reduce((count, fact) => count + fact.messages.filter((message) =>
+      message.type === "internal" && !message.isBot && inWindow(message.timestamp, window)
+    ).length, 0),
+    nextResponses: facts.flatMap((fact) => fact.responses
+      .filter((response) => !response.first && inWindow(response.requestedAt, window))
+      .map((response) => response.durationSeconds)),
+    resolvedFacts,
+    waiting: backlogFacts.filter((fact) => isWaitingAt(fact, window.to)).length
+  }).metrics;
+}
+
+interface WindowMetricEvidence {
+  agentTouches: number;
+  asOf: number;
+  backlog: number;
+  from: number;
+  incomingFacts: readonly ConversationFact[];
+  internalComments: number;
+  nextResponses: readonly number[];
+  resolvedFacts: readonly ConversationFact[];
+  waiting: number;
+}
+
+interface WindowMetricComputation {
+  metrics: SupportOperationsMetrics;
+  samples: {
+    csatPositive: number;
+  };
+}
+
+function metricsFromEvidence(evidence: WindowMetricEvidence): WindowMetricComputation {
+  const { asOf, from, incomingFacts, nextResponses, resolvedFacts } = evidence;
   const firstResponses = incomingFacts.flatMap((fact) => {
     const sample = fact.responses.find((response) => response.first);
     return sample ? [sample.durationSeconds] : [];
   });
-  const nextResponses = facts.flatMap((fact) => fact.responses
-    .filter((response) => !response.first && inWindow(response.requestedAt, window))
-    .map((response) => response.durationSeconds));
   const firstResolutionDurations = resolvedFacts.flatMap((fact) => {
     const startedAt = fact.startedAt;
     if (startedAt === undefined) return [];
-    const firstClose = fact.closeEvents.find((timestamp) => timestamp >= startedAt && timestamp < window.to);
-    return firstClose === undefined ? [] : [Math.max(0, (firstClose - startedAt) / 1_000)];
+    const firstClose = fact.closeEvents.find((timestamp) => timestamp >= startedAt);
+    return firstClose === undefined || firstClose < from || firstClose >= asOf
+      ? []
+      : [Math.max(0, (firstClose - startedAt) / 1_000)];
   });
   const fullResolutionDurations = resolvedFacts.flatMap((fact) => {
-    if (fact.startedAt === undefined || !isClosedAt(fact, window.to)) return [];
-    const lastClose = fact.closeEvents.filter((timestamp) => timestamp < window.to).at(-1);
+    if (fact.startedAt === undefined || !isClosedAt(fact, asOf)) return [];
+    const lastClose = fact.closeEvents.filter((timestamp) => timestamp < asOf).at(-1);
     return lastClose === undefined ? [] : [Math.max(0, (lastClose - fact.startedAt) / 1_000)];
   });
-  const reopenedConversations = resolvedFacts.filter((fact) => reopenedAfterResolution(fact, window.to)).length;
+  const reopenedConversations = resolvedFacts.filter((fact) => reopenedAfterResolution(fact, asOf)).length;
   const oneTouchResolved = resolvedFacts.filter((fact) => {
-    const resolutionAt = fact.closeEvents.filter((timestamp) => timestamp < window.to).at(-1);
-    if (resolutionAt === undefined || reopenedAfterResolution(fact, window.to)) return false;
+    const resolutionAt = fact.closeEvents.filter((timestamp) => timestamp < asOf).at(-1);
+    if (resolutionAt === undefined || reopenedAfterResolution(fact, asOf)) return false;
     return humanAgentTouches(fact.messages, { from: fact.startedAt ?? 0, to: resolutionAt + 1 }).length === 1;
   }).length;
   const csatRatings = resolvedFacts.flatMap((fact) => {
-    const rating = fact.ratings.filter((candidate) => candidate.timestamp < window.to).at(-1);
+    const rating = fact.ratings.filter((candidate) => candidate.timestamp < asOf).at(-1);
     return rating ? [rating] : [];
   });
   const knownScaleMaximums = uniqueNumbers(csatRatings.flatMap((rating) => rating.maximum === null ? [] : [rating.maximum]));
-  const csatScaleMaximum = knownScaleMaximums.length === 1 ? knownScaleMaximums[0]! : null;
+  const csatScaleMaximum = knownScaleMaximums.length === 1
+    && csatRatings.every((rating) => rating.maximum === knownScaleMaximums[0])
+    ? knownScaleMaximums[0]!
+    : null;
   const csatAverage = csatRatings.length > 0 && csatScaleMaximum !== null && csatRatings.every((rating) => rating.maximum === csatScaleMaximum)
     ? average(csatRatings.map((rating) => rating.score))
     : null;
   const positiveRatings = csatRatings.flatMap((rating) => rating.positive === null ? [] : [rating.positive]);
-  const touches = facts.flatMap((fact) => humanAgentTouches(fact.messages, window));
-  const internalComments = facts.reduce((count, fact) => count + fact.messages.filter((message) =>
-    message.type === "internal" && !message.isBot && inWindow(message.timestamp, window)
-  ).length, 0);
   const slaRecorded = incomingFacts.filter((fact) => fact.slaRecorded);
   const slaBreaches = slaRecorded.filter((fact) => fact.slaBreached).length;
 
   return {
-    agentTouches: touches.length,
-    backlog: backlogFacts.length,
-    csatAverage,
-    csatCoveragePercent: resolvedFacts.length === 0 ? null : percentage(csatRatings.length, resolvedFacts.length),
-    csatPositiveRatePercent: positiveRatings.length === 0 ? null : percentage(positiveRatings.filter(Boolean).length, positiveRatings.length),
-    csatSamples: csatRatings.length,
-    csatScaleMaximum,
-    firstResolutionMedianSeconds: percentile(firstResolutionDurations, 0.5),
-    firstResolutionP90Seconds: percentile(firstResolutionDurations, 0.9),
-    firstResolutionSamples: firstResolutionDurations.length,
-    firstResponseAverageSeconds: firstResponses.length === 0 ? null : average(firstResponses),
-    firstResponseCoveragePercent: incomingFacts.length === 0 ? null : percentage(firstResponses.length, incomingFacts.length),
-    firstResponseMedianSeconds: percentile(firstResponses, 0.5),
-    firstResponseP90Seconds: percentile(firstResponses, 0.9),
-    firstResponseSamples: firstResponses.length,
-    fullResolutionMedianSeconds: percentile(fullResolutionDurations, 0.5),
-    fullResolutionP90Seconds: percentile(fullResolutionDurations, 0.9),
-    fullResolutionSamples: fullResolutionDurations.length,
-    incoming: incomingFacts.length,
-    internalComments,
-    nextResponseMedianSeconds: percentile(nextResponses, 0.5),
-    nextResponseP90Seconds: percentile(nextResponses, 0.9),
-    nextResponseSamples: nextResponses.length,
-    oneTouchResolutionCount: oneTouchResolved,
-    oneTouchResolutionPercent: resolvedFacts.length === 0 ? null : percentage(oneTouchResolved, resolvedFacts.length),
-    oneTouchResolutionSamples: resolvedFacts.length,
-    reopenRatePercent: resolvedFacts.length === 0 ? null : percentage(reopenedConversations, resolvedFacts.length),
-    reopenedConversations,
-    resolved: resolvedFacts.length,
-    slaAttainmentPercent: slaRecorded.length === 0 ? null : percentage(slaRecorded.length - slaBreaches, slaRecorded.length),
-    slaBreaches,
-    slaRecordedSamples: slaRecorded.length,
-    waiting: backlogFacts.filter((fact) => isWaitingAt(fact, window.to)).length
+    metrics: {
+      agentTouches: evidence.agentTouches,
+      backlog: evidence.backlog,
+      csatAverage,
+      csatCoveragePercent: resolvedFacts.length === 0 ? null : percentage(csatRatings.length, resolvedFacts.length),
+      csatPositiveRatePercent: positiveRatings.length === 0 ? null : percentage(positiveRatings.filter(Boolean).length, positiveRatings.length),
+      csatSamples: csatRatings.length,
+      csatScaleMaximum,
+      firstResolutionMedianSeconds: percentile(firstResolutionDurations, 0.5),
+      firstResolutionP90Seconds: percentile(firstResolutionDurations, 0.9),
+      firstResolutionSamples: firstResolutionDurations.length,
+      firstResponseAverageSeconds: firstResponses.length === 0 ? null : average(firstResponses),
+      firstResponseCoveragePercent: incomingFacts.length === 0 ? null : percentage(firstResponses.length, incomingFacts.length),
+      firstResponseMedianSeconds: percentile(firstResponses, 0.5),
+      firstResponseP90Seconds: percentile(firstResponses, 0.9),
+      firstResponseSamples: firstResponses.length,
+      fullResolutionMedianSeconds: percentile(fullResolutionDurations, 0.5),
+      fullResolutionP90Seconds: percentile(fullResolutionDurations, 0.9),
+      fullResolutionSamples: fullResolutionDurations.length,
+      incoming: incomingFacts.length,
+      internalComments: evidence.internalComments,
+      nextResponseMedianSeconds: percentile(nextResponses, 0.5),
+      nextResponseP90Seconds: percentile(nextResponses, 0.9),
+      nextResponseSamples: nextResponses.length,
+      oneTouchResolutionCount: oneTouchResolved,
+      oneTouchResolutionPercent: resolvedFacts.length === 0 ? null : percentage(oneTouchResolved, resolvedFacts.length),
+      oneTouchResolutionSamples: resolvedFacts.length,
+      reopenRatePercent: resolvedFacts.length === 0 ? null : percentage(reopenedConversations, resolvedFacts.length),
+      reopenedConversations,
+      resolved: resolvedFacts.length,
+      slaAttainmentPercent: slaRecorded.length === 0 ? null : percentage(slaRecorded.length - slaBreaches, slaRecorded.length),
+      slaBreaches,
+      slaRecordedSamples: slaRecorded.length,
+      waiting: evidence.waiting
+    },
+    samples: {
+      csatPositive: positiveRatings.length
+    }
   };
 }
 
@@ -763,7 +864,8 @@ function operatorBreakdown(facts: readonly ConversationFact[], window: Timestamp
 function buildTimeSeries(
   facts: readonly ConversationFact[],
   period: SupportOperationsPeriod,
-  windows: ReportWindows
+  windows: ReportWindows,
+  timezoneOffsetMinutes: number
 ): SupportOperationsTimeSeries {
   const logicalDurationDays = (windows.currentLogicalTo - windows.current.from) / DAY_MS;
   const longCustom = period === "custom" && logicalDurationDays > LONG_CUSTOM_DAYS;
@@ -776,8 +878,211 @@ function buildTimeSeries(
     aggregationReason: longCustom ? "custom_range_exceeds_93_days" : null,
     current: seriesForWindow(facts, windows.current, step),
     granularity,
+    kpi: buildKpiTimeSeries(facts, windows, timezoneOffsetMinutes),
     previous: seriesForWindow(facts, windows.previous, step)
   };
+}
+
+const KPI_TIME_SERIES_GRAINS: readonly SupportOperationsKpiTimeSeriesGrain[] = ["day", "week", "month"];
+
+function buildKpiTimeSeries(
+  facts: readonly ConversationFact[],
+  windows: ReportWindows,
+  timezoneOffsetMinutes: number
+): SupportOperationsKpiTimeSeries {
+  return {
+    availableGrains: [...KPI_TIME_SERIES_GRAINS],
+    byGrain: Object.fromEntries(KPI_TIME_SERIES_GRAINS.map((grain) => [grain, {
+      current: kpiSeriesForWindow(facts, windows.current, grain, timezoneOffsetMinutes),
+      previous: kpiSeriesForWindow(facts, windows.previous, grain, timezoneOffsetMinutes)
+    }])) as Record<SupportOperationsKpiTimeSeriesGrain, SupportOperationsKpiTimeSeriesWindow>
+  };
+}
+
+function kpiSeriesForWindow(
+  facts: readonly ConversationFact[],
+  window: TimestampWindow,
+  grain: SupportOperationsKpiTimeSeriesGrain,
+  timezoneOffsetMinutes: number
+): SupportOperationsKpiTimeSeriesPoint[] {
+  const buckets: KpiBucketAccumulator[] = [];
+  for (let from = window.from; from < window.to;) {
+    const nextBoundary = nextCalendarBoundary(from, grain, timezoneOffsetMinutes);
+    const to = Math.min(window.to, nextBoundary);
+    if (to <= from) throw new RangeError(`Unable to advance ${grain} KPI time-series boundary.`);
+    buckets.push(emptyKpiBucket(from, to));
+    from = to;
+  }
+  for (const fact of facts) addFactToKpiBuckets(fact, buckets);
+  return buckets.map((bucket) => {
+    const computation = metricsFromEvidence({
+      agentTouches: bucket.agentTouches,
+      asOf: bucket.to,
+      backlog: bucket.backlog,
+      from: bucket.from,
+      incomingFacts: [...bucket.incomingFacts],
+      internalComments: bucket.internalComments,
+      nextResponses: bucket.nextResponses,
+      resolvedFacts: [...bucket.resolvedFacts],
+      waiting: bucket.waiting
+    });
+    return {
+      from: new Date(bucket.from).toISOString(),
+      metrics: kpiPointMetrics(computation),
+      to: new Date(bucket.to).toISOString()
+    };
+  });
+}
+
+interface KpiBucketAccumulator extends TimestampWindow {
+  agentTouches: number;
+  backlog: number;
+  incomingFacts: Set<ConversationFact>;
+  internalComments: number;
+  nextResponses: number[];
+  resolvedFacts: Set<ConversationFact>;
+  waiting: number;
+}
+
+function emptyKpiBucket(from: number, to: number): KpiBucketAccumulator {
+  return {
+    agentTouches: 0,
+    backlog: 0,
+    from,
+    incomingFacts: new Set(),
+    internalComments: 0,
+    nextResponses: [],
+    resolvedFacts: new Set(),
+    to,
+    waiting: 0
+  };
+}
+
+function addFactToKpiBuckets(fact: ConversationFact, buckets: KpiBucketAccumulator[]): void {
+  const incomingIndex = bucketIndexForTimestamp(buckets, fact.startedAt);
+  if (incomingIndex !== -1) buckets[incomingIndex]!.incomingFacts.add(fact);
+  for (const closedAt of fact.closeEvents) {
+    const index = bucketIndexForTimestamp(buckets, closedAt);
+    if (index !== -1) buckets[index]!.resolvedFacts.add(fact);
+  }
+  for (const response of fact.responses) {
+    if (response.first) continue;
+    const index = bucketIndexForTimestamp(buckets, response.requestedAt);
+    if (index !== -1) buckets[index]!.nextResponses.push(response.durationSeconds);
+  }
+  for (const message of fact.messages) {
+    const index = bucketIndexForTimestamp(buckets, message.timestamp);
+    if (index === -1 || message.isBot) continue;
+    if (message.type === "public" && message.side === "agent") buckets[index]!.agentTouches += 1;
+    if (message.type === "internal") buckets[index]!.internalComments += 1;
+  }
+  addFactSnapshotsToKpiBuckets(fact, buckets);
+}
+
+function addFactSnapshotsToKpiBuckets(fact: ConversationFact, buckets: KpiBucketAccumulator[]): void {
+  if (buckets.length === 0 || fact.startedAt === undefined) return;
+  const transitions = [
+    ...fact.closeEvents.map((timestamp) => ({ closed: true, timestamp })),
+    ...fact.reopenEvents.map((timestamp) => ({ closed: false, timestamp }))
+  ].sort((left, right) => left.timestamp - right.timestamp || Number(left.closed) - Number(right.closed));
+  let closed = false;
+  let hasTransition = false;
+  let transitionIndex = 0;
+  let messageIndex = 0;
+  let waiting = false;
+  for (const bucket of buckets) {
+    while (transitionIndex < transitions.length && transitions[transitionIndex]!.timestamp < bucket.to) {
+      closed = transitions[transitionIndex]!.closed;
+      hasTransition = true;
+      transitionIndex += 1;
+    }
+    while (messageIndex < fact.messages.length && fact.messages[messageIndex]!.timestamp < bucket.to) {
+      const message = fact.messages[messageIndex]!;
+      if (message.type === "public" && message.side === "client") waiting = true;
+      if (message.type === "public" && message.side === "agent" && !message.isBot) waiting = false;
+      messageIndex += 1;
+    }
+    const baselineClosed = !hasTransition
+      && fact.statusBaseline !== undefined
+      && fact.statusBaseline.timestamp <= bucket.to
+      && fact.statusBaseline.closed;
+    if (fact.startedAt < bucket.to && !(hasTransition ? closed : baselineClosed)) {
+      bucket.backlog += 1;
+      if (waiting) bucket.waiting += 1;
+    }
+  }
+}
+
+function bucketIndexForTimestamp(
+  buckets: readonly TimestampWindow[],
+  timestamp: number | undefined
+): number {
+  if (timestamp === undefined || buckets.length === 0
+    || timestamp < buckets[0]!.from || timestamp >= buckets.at(-1)!.to) return -1;
+  let low = 0;
+  let high = buckets.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const bucket = buckets[middle]!;
+    if (timestamp < bucket.from) high = middle - 1;
+    else if (timestamp >= bucket.to) low = middle + 1;
+    else return middle;
+  }
+  return -1;
+}
+
+function nextCalendarBoundary(
+  timestamp: number,
+  grain: SupportOperationsKpiTimeSeriesGrain,
+  timezoneOffsetMinutes: number
+): number {
+  const offsetMs = timezoneOffsetMinutes * 60_000;
+  const local = new Date(timestamp + offsetMs);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth();
+  const day = local.getUTCDate();
+  if (grain === "day") return Date.UTC(year, month, day + 1) - offsetMs;
+  if (grain === "month") return Date.UTC(year, month + 1, 1) - offsetMs;
+  const weekday = local.getUTCDay();
+  const daysUntilMonday = weekday === 0 ? 1 : 8 - weekday;
+  return Date.UTC(year, month, day + daysUntilMonday) - offsetMs;
+}
+
+function kpiPointMetrics(computation: WindowMetricComputation): SupportOperationsKpiTimeSeriesPoint["metrics"] {
+  const { metrics } = computation;
+  return {
+    agentTouches: timeSeriesMetric(metrics.agentTouches, metrics.agentTouches),
+    backlog: timeSeriesMetric(metrics.backlog, metrics.backlog),
+    csatAverage: timeSeriesMetric(metrics.csatAverage, metrics.csatSamples, metrics.csatScaleMaximum),
+    csatCoveragePercent: timeSeriesMetric(metrics.csatCoveragePercent, metrics.resolved),
+    csatPositiveRatePercent: timeSeriesMetric(metrics.csatPositiveRatePercent, computation.samples.csatPositive),
+    firstResolutionP50Seconds: timeSeriesMetric(metrics.firstResolutionMedianSeconds, metrics.firstResolutionSamples),
+    firstResolutionP90Seconds: timeSeriesMetric(metrics.firstResolutionP90Seconds, metrics.firstResolutionSamples),
+    firstResponseCoveragePercent: timeSeriesMetric(metrics.firstResponseCoveragePercent, metrics.incoming),
+    firstResponseP50Seconds: timeSeriesMetric(metrics.firstResponseMedianSeconds, metrics.firstResponseSamples),
+    firstResponseP90Seconds: timeSeriesMetric(metrics.firstResponseP90Seconds, metrics.firstResponseSamples),
+    fullResolutionP50Seconds: timeSeriesMetric(metrics.fullResolutionMedianSeconds, metrics.fullResolutionSamples),
+    fullResolutionP90Seconds: timeSeriesMetric(metrics.fullResolutionP90Seconds, metrics.fullResolutionSamples),
+    incoming: timeSeriesMetric(metrics.incoming, metrics.incoming),
+    internalComments: timeSeriesMetric(metrics.internalComments, metrics.internalComments),
+    nextResponseP50Seconds: timeSeriesMetric(metrics.nextResponseMedianSeconds, metrics.nextResponseSamples),
+    nextResponseP90Seconds: timeSeriesMetric(metrics.nextResponseP90Seconds, metrics.nextResponseSamples),
+    oneTouchResolutionPercent: timeSeriesMetric(metrics.oneTouchResolutionPercent, metrics.oneTouchResolutionSamples),
+    reopenRatePercent: timeSeriesMetric(metrics.reopenRatePercent, metrics.resolved),
+    resolved: timeSeriesMetric(metrics.resolved, metrics.resolved),
+    responseCoveragePercent: timeSeriesMetric(metrics.firstResponseCoveragePercent, metrics.incoming),
+    slaAttainmentPercent: timeSeriesMetric(metrics.slaAttainmentPercent, metrics.slaRecordedSamples),
+    slaBreaches: timeSeriesMetric(metrics.slaBreaches, metrics.slaBreaches),
+    waiting: timeSeriesMetric(metrics.waiting, metrics.waiting)
+  };
+}
+
+function timeSeriesMetric(
+  value: number | null,
+  samples: number,
+  scaleMaximum?: number | null
+): SupportOperationsKpiTimeSeriesMetric {
+  return { samples, ...(scaleMaximum === undefined ? {} : { scaleMaximum }), value };
 }
 
 function seriesForWindow(facts: readonly ConversationFact[], window: TimestampWindow, step: number): SupportOperationsTimeSeriesPoint[] {

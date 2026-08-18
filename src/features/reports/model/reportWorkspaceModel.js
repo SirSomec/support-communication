@@ -1,4 +1,9 @@
 import { REPORT_METRIC_REGISTRY } from "./reportMetricRegistry.js";
+import {
+  normalizeReportTrend,
+  REPORT_TREND_GRAIN_OPTIONS,
+  REPORT_TREND_METRIC_OPTIONS
+} from "./reportViewState.js";
 
 const METRIC_ALIASES = Object.freeze({
   incomingConversations: "incoming",
@@ -16,10 +21,16 @@ const METRIC_ALIASES = Object.freeze({
   medianFirstResponseSeconds: "firstResponseMedianSeconds",
   p90FirstResponseSeconds: "firstResponseP90Seconds",
   firstResponseCoveragePercent: "responseCoverage",
+  responseCoveragePercent: "responseCoverage",
+  nextResponseP50Seconds: "nextResponseMedianSeconds",
+  p50NextResponseSeconds: "nextResponseMedianSeconds",
+  p90NextResponseSeconds: "nextResponseP90Seconds",
   medianResolutionSeconds: "resolutionMedianSeconds",
+  firstResolutionP50Seconds: "resolutionMedianSeconds",
   firstResolutionMedianSeconds: "resolutionMedianSeconds",
   firstResolutionP90Seconds: "resolutionP90Seconds",
   p90ResolutionSeconds: "resolutionP90Seconds",
+  fullResolutionP50Seconds: "fullResolutionMedianSeconds",
   csatScore: "csatAverage",
   csatPositivePercent: "csatPositiveRate",
   csatPositiveRatePercent: "csatPositiveRate",
@@ -30,6 +41,51 @@ const METRIC_ALIASES = Object.freeze({
   oneTouchResolutionPercent: "oneTouchRate",
   firstResponseCoverage: "responseCoverage",
   overdueConversations: "overdue"
+});
+
+const TREND_PRESET_DETAILS = Object.freeze({
+  volume: {
+    chartType: "bar",
+    description: "Входящие, решённые и бэклог в одном временном масштабе",
+    format: "integer",
+    series: [
+      { color: "#2f6df6", key: "incoming", label: "Входящие" },
+      { color: "#12aaa0", key: "resolved", label: "Решено" },
+      { chartType: "line", color: "#7b8799", dashed: true, key: "backlog", label: "Бэклог" }
+    ],
+    title: "Динамика обращений"
+  },
+  queueHealth: {
+    chartType: "area",
+    description: "Размер бэклога и обращения, ожидающие ответа, на конец периода",
+    format: "integer",
+    series: [
+      { color: "#6f7f98", key: "backlog", label: "Бэклог" },
+      { chartType: "line", color: "#e58a2f", key: "waiting", label: "Ожидают" }
+    ],
+    title: "Состояние очереди"
+  },
+  firstResponse: durationTrend("Время первого ответа", "Скорость первого публичного ответа оператора", "firstResponse"),
+  nextResponse: durationTrend("Время следующего ответа", "Скорость последующих публичных ответов оператора", "nextResponse"),
+  resolution: durationTrend("Время решения", "Время до первого зафиксированного решения", "resolution"),
+  fullResolution: durationTrend("Полное время решения", "Время от создания до последнего решения с учётом переоткрытий", "fullResolution"),
+  csatAverage: singleTrend("CSAT", "Средняя оценка удовлетворённости по единой шкале", "csatAverage", "rating", "#7a5af8"),
+  csatPositiveRate: singleTrend("Положительный CSAT", "Доля положительных оценок среди валидных ответов", "csatPositiveRate", "percent", "#7a5af8"),
+  slaAttainment: singleTrend("SLA без нарушения", "Доля обращений с соблюдённым SLA", "slaAttainment", "percent", "#2f6df6"),
+  responseCoverage: singleTrend("Покрытие первым ответом", "Доля входящих обращений с измеримым первым ответом", "responseCoverage", "percent", "#0f8f87"),
+  csatCoverage: singleTrend("Покрытие CSAT", "Доля решённых обращений с валидной оценкой", "csatCoverage", "percent", "#7a5af8"),
+  reopenRate: singleTrend("Переоткрытия", "Доля решённых обращений, открытых повторно", "reopenRate", "percent", "#d66a3a"),
+  oneTouchRate: singleTrend("One-touch resolution", "Доля решений за одно касание оператора", "oneTouchRate", "percent", "#12aaa0"),
+  workload: {
+    chartType: "bar",
+    description: "Публичные касания операторов и внутренние комментарии за период",
+    format: "integer",
+    series: [
+      { color: "#2f6df6", key: "agentTouches", label: "Касания операторов" },
+      { color: "#8d6e63", key: "internalComments", label: "Внутренние комментарии" }
+    ],
+    title: "Нагрузка команды"
+  }
 });
 
 export const HERO_METRIC_KEYS = [
@@ -70,6 +126,10 @@ function normalizeOperations(raw) {
     raw.comparisons
   );
   decorateMetricEvidence(metricShape, raw.metrics?.current ?? raw.metrics ?? {});
+  const timeSeries = normalizeTimeSeries(
+    raw.timeSeries ?? raw.series ?? raw.trend,
+    raw.period?.timezoneOffsetMinutes
+  );
   return {
     backlogAge: normalizeBreakdownRows(raw.backlogAge ?? raw.backlogAgeBuckets ?? raw.queueHealth?.ageBuckets),
     breakdowns: {
@@ -86,8 +146,11 @@ function normalizeOperations(raw) {
     serviceLevel: normalizeServiceLevel(raw.serviceLevel ?? raw.serviceLevels, metricShape),
     period: raw.period ?? null,
     source: raw.source ?? "conversation_lifecycle_events",
-    timeSeries: normalizeTimeSeries(
-      raw.timeSeries ?? raw.series ?? raw.trend,
+    timeSeries,
+    trendExplorer: normalizeTrendExplorer(
+      raw.trendExplorer ?? raw.timeSeries?.kpi ?? raw.kpiTimeSeries,
+      timeSeries,
+      metricShape,
       raw.period?.timezoneOffsetMinutes
     ),
     version: raw.version ?? "support-ops/v2",
@@ -198,6 +261,194 @@ function rowsFromColumnarSeries(source, timezoneOffsetMinutes = 0) {
     label: labels[index] ?? index + 1,
     resolved: resolved[index]
   }, index, source.grain ?? "day", timezoneOffsetMinutes));
+}
+
+function normalizeTrendExplorer(raw, fallbackTimeSeries, metrics, timezoneOffsetMinutes = 0) {
+  const supportedGrains = REPORT_TREND_GRAIN_OPTIONS.map(({ value }) => value);
+  const advertisedGrains = Array.isArray(raw?.availableGrains)
+    ? raw.availableGrains.filter((grain) => supportedGrains.includes(grain))
+    : [];
+  const byGrain = {};
+
+  for (const grain of supportedGrains) {
+    const source = raw?.byGrain?.[grain] ?? raw?.[grain];
+    if (!source) continue;
+    byGrain[grain] = {
+      current: normalizeKpiTrendPoints(source.current ?? source.rows ?? source, grain, timezoneOffsetMinutes),
+      previous: normalizeKpiTrendPoints(source.previous, grain, timezoneOffsetMinutes)
+    };
+  }
+
+  if (!Object.keys(byGrain).length && fallbackTimeSeries) {
+    const fallbackGrain = supportedGrains.includes(fallbackTimeSeries.grain) ? fallbackTimeSeries.grain : "day";
+    byGrain[fallbackGrain] = {
+      current: fallbackTrendPoints(fallbackTimeSeries.rows, fallbackGrain),
+      previous: []
+    };
+  }
+
+  const availableGrains = [...new Set([
+    ...advertisedGrains,
+    ...Object.keys(byGrain)
+  ])].filter((grain) => supportedGrains.includes(grain));
+
+  return {
+    availableGrains: availableGrains.length ? availableGrains : ["day"],
+    byGrain,
+    metricOptions: trendMetricOptions(metrics)
+  };
+}
+
+function normalizeKpiTrendPoints(points, grain, timezoneOffsetMinutes) {
+  if (!Array.isArray(points)) return [];
+  return points.map((point, index) => {
+    const sourceMetrics = point?.metrics && typeof point.metrics === "object" ? point.metrics : point?.values ?? {};
+    const normalizedMetrics = {};
+    for (const [inputKey, entry] of Object.entries(sourceMetrics)) {
+      const key = canonicalMetricKey(inputKey);
+      if (!key) continue;
+      normalizedMetrics[key] = normalizeKpiTrendMetric(entry);
+    }
+    return {
+      from: point?.from ?? point?.timestamp ?? null,
+      label: String(point?.label ?? formatTrendBucketLabel(point?.from, point?.to, grain, timezoneOffsetMinutes) ?? index + 1),
+      metrics: normalizedMetrics,
+      timestamp: point?.timestamp ?? point?.from ?? null,
+      to: point?.to ?? null
+    };
+  });
+}
+
+function normalizeKpiTrendMetric(entry) {
+  const objectEntry = entry && typeof entry === "object" ? entry : { value: entry };
+  return {
+    samples: nullableNumber(objectEntry.samples ?? objectEntry.sampleSize ?? objectEntry.n),
+    scaleMaximum: nullableNumber(objectEntry.scaleMaximum ?? objectEntry.maximum ?? objectEntry.scale?.maximum),
+    value: nullableNumber(objectEntry.value ?? objectEntry.current ?? objectEntry.count)
+  };
+}
+
+function fallbackTrendPoints(rows, grain) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row, index) => ({
+    from: row.timestamp ?? null,
+    label: String(row.label ?? index + 1),
+    metrics: {
+      backlog: { samples: nullableNumber(row.backlog), scaleMaximum: null, value: nullableNumber(row.backlog) },
+      incoming: { samples: nullableNumber(row.incoming), scaleMaximum: null, value: nullableNumber(row.incoming) },
+      resolved: { samples: nullableNumber(row.resolved), scaleMaximum: null, value: nullableNumber(row.resolved) }
+    },
+    timestamp: row.timestamp ?? null,
+    to: null,
+    grain
+  }));
+}
+
+function trendMetricOptions(metrics) {
+  return REPORT_TREND_METRIC_OPTIONS.map(({ label, value }) => {
+    const details = TREND_PRESET_DETAILS[value];
+    const domain = details.format === "percent"
+      ? { max: 100, min: 0 }
+      : details.format === "rating" && Number.isFinite(Number(metrics.csatAverage?.scaleMaximum))
+        ? { max: Number(metrics.csatAverage.scaleMaximum), min: 0 }
+        : { min: 0 };
+    return {
+      ...details,
+      domain,
+      key: value,
+      label,
+      series: details.series.map((series) => ({ ...series, format: details.format }))
+    };
+  });
+}
+
+export function selectTrendExplorerView(explorer, selection) {
+  const normalizedSelection = normalizeReportTrend(selection);
+  const metricOptions = Array.isArray(explorer?.metricOptions) ? explorer.metricOptions : trendMetricOptions({});
+  const option = metricOptions.find(({ key }) => key === normalizedSelection.metric)
+    ?? metricOptions.find(({ key }) => key === "volume")
+    ?? metricOptions[0];
+  const availableGrains = Array.isArray(explorer?.availableGrains) && explorer.availableGrains.length
+    ? explorer.availableGrains
+    : ["day"];
+  const grain = availableGrains.includes(normalizedSelection.grain)
+    ? normalizedSelection.grain
+    : availableGrains[0];
+  const window = explorer?.byGrain?.[grain] ?? { current: [], previous: [] };
+  const rows = Array.isArray(window.current) ? window.current : [];
+  let series = option.series.map((definition) => ({
+    ...definition,
+    samples: rows.map((row) => row.metrics?.[definition.key]?.samples ?? null),
+    scaleMaximums: rows.map((row) => row.metrics?.[definition.key]?.scaleMaximum ?? null),
+    values: rows.map((row) => row.metrics?.[definition.key]?.value ?? null)
+  }));
+  const ratingScaleMaximums = option.format === "rating"
+    ? [...new Set(series.flatMap((item) => item.values.flatMap((value, index) => value === null ? [] : [item.scaleMaximums[index]]).filter(Number.isFinite)))]
+    : [];
+  const incompatibleRatingScales = ratingScaleMaximums.length > 1;
+  if (incompatibleRatingScales) {
+    series = series.map((item) => ({ ...item, values: item.values.map(() => null) }));
+  }
+  const chartRows = rows.map((row, index) => ({
+    ...row,
+    samples: Object.fromEntries(series.map((item) => [item.key, item.samples[index]])),
+    scaleMaximums: Object.fromEntries(series.map((item) => [item.key, item.scaleMaximums[index]])),
+    values: Object.fromEntries(series.map((item) => [item.key, item.values[index]]))
+  }));
+  return {
+    ...option,
+    availableGrains,
+    domain: option.format === "rating" && ratingScaleMaximums.length === 1
+      ? { max: ratingScaleMaximums[0], min: 0 }
+      : option.domain,
+    grain,
+    incompatibleRatingScales,
+    metric: option.key,
+    metricOptions,
+    previous: Array.isArray(window.previous) ? window.previous : [],
+    rows: chartRows,
+    series
+  };
+}
+
+function durationTrend(title, description, prefix) {
+  return {
+    chartType: "line",
+    description,
+    format: "duration",
+    series: [
+      { color: "#2f6df6", key: `${prefix}MedianSeconds`, label: "P50" },
+      { color: "#7a5af8", dashed: true, key: `${prefix}P90Seconds`, label: "P90" }
+    ],
+    title
+  };
+}
+
+function singleTrend(title, description, key, format, color) {
+  return {
+    chartType: "line",
+    description,
+    format,
+    series: [{ color, key, label: title }],
+    title
+  };
+}
+
+function formatTrendBucketLabel(from, to, grain, timezoneOffsetMinutes = 0) {
+  const start = Date.parse(String(from ?? ""));
+  if (!Number.isFinite(start)) return null;
+  const offset = Number.isFinite(Number(timezoneOffsetMinutes)) ? Number(timezoneOffsetMinutes) * 60_000 : 0;
+  if (grain === "month") {
+    return new Intl.DateTimeFormat("ru-RU", { month: "short", timeZone: "UTC", year: "numeric" }).format(start + offset);
+  }
+  if (grain === "week") {
+    const end = Date.parse(String(to ?? ""));
+    const inclusiveEnd = Number.isFinite(end) && end > start ? end - 1 : start;
+    const startLabel = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" }).format(start + offset);
+    const endLabel = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" }).format(inclusiveEnd + offset);
+    return `${startLabel} — ${endLabel}`;
+  }
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", timeZone: "UTC" }).format(start + offset);
 }
 
 function normalizeServiceLevel(raw, metrics) {
@@ -352,6 +603,7 @@ function legacyOperations(payload) {
     label,
     resolved: nullableNumber(chart.series?.[1]?.points?.[index]) ?? 0
   })) : [];
+  const timeSeries = normalizeTimeSeries(rows);
   return {
     backlogAge: [],
     breakdowns: { channels: normalizeBreakdownRows(payload.bars), operators: [], queues: [], teams: [], topics: [] },
@@ -361,7 +613,8 @@ function legacyOperations(payload) {
     metrics,
     serviceLevel: normalizeServiceLevel(null, metrics),
     source: payload.source ?? "conversation_lifecycle_events",
-    timeSeries: normalizeTimeSeries(rows),
+    timeSeries,
+    trendExplorer: normalizeTrendExplorer(null, timeSeries, metrics),
     version: payload.metricDefinitionVersion ?? "legacy",
     windows: payload.windows ?? null
   };

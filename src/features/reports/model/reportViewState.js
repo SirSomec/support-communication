@@ -8,6 +8,34 @@ export const REPORT_PERIOD_OPTIONS = [
   { label: "Свой период", value: "custom" }
 ];
 
+export const REPORT_TREND_GRAIN_OPTIONS = Object.freeze([
+  { label: "По дням", value: "day" },
+  { label: "По неделям", value: "week" },
+  { label: "По месяцам", value: "month" }
+]);
+
+export const REPORT_TREND_METRIC_OPTIONS = Object.freeze([
+  { label: "Обращения", value: "volume" },
+  { label: "Состояние очереди", value: "queueHealth" },
+  { label: "Время первого ответа", value: "firstResponse" },
+  { label: "Время следующего ответа", value: "nextResponse" },
+  { label: "Время решения", value: "resolution" },
+  { label: "Полное время решения", value: "fullResolution" },
+  { label: "SLA без нарушения", value: "slaAttainment" },
+  { label: "CSAT", value: "csatAverage" },
+  { label: "Положительный CSAT", value: "csatPositiveRate" },
+  { label: "Покрытие CSAT", value: "csatCoverage" },
+  { label: "Покрытие первым ответом", value: "responseCoverage" },
+  { label: "Переоткрытия", value: "reopenRate" },
+  { label: "One-touch resolution", value: "oneTouchRate" },
+  { label: "Нагрузка команды", value: "workload" }
+]);
+
+export const REPORT_TREND_DEFAULTS = Object.freeze({ grain: "day", metric: "volume" });
+
+const REPORT_TREND_GRAINS = new Set(REPORT_TREND_GRAIN_OPTIONS.map(({ value }) => value));
+const REPORT_TREND_METRICS = new Set(REPORT_TREND_METRIC_OPTIONS.map(({ value }) => value));
+
 export const REPORT_FILTER_DEFAULTS = Object.freeze({
   channel: "all",
   operatorId: "all",
@@ -26,7 +54,8 @@ export function createDefaultReportView(now = new Date()) {
       to: localDateValue(now, 0)
     },
     filters: { ...REPORT_FILTER_DEFAULTS },
-    period: "7days"
+    period: "7days",
+    trend: { ...REPORT_TREND_DEFAULTS }
   };
 }
 
@@ -44,11 +73,16 @@ export function reportViewFromLocation(locationLike = globalThis.location, now =
   }
   const from = normalizeDateInput(params.get("reportFrom")) ?? defaults.customRange.from;
   const to = normalizeDateInput(params.get("reportTo")) ?? defaults.customRange.to;
+  const trend = normalizeReportTrend({
+    grain: params.get("reportTrendGrain"),
+    metric: params.get("reportTrendMetric")
+  });
   return {
     compare: params.get("reportCompare") !== "0",
     customRange: { from, to },
     filters,
-    period
+    period,
+    trend
   };
 }
 
@@ -57,6 +91,9 @@ export function persistReportView(view, historyLike = globalThis.history, locati
   const url = new URL(locationLike.href);
   url.searchParams.set("reportPeriod", view.period);
   url.searchParams.set("reportCompare", view.compare ? "1" : "0");
+  const trend = normalizeReportTrend(view.trend);
+  url.searchParams.set("reportTrendMetric", trend.metric);
+  url.searchParams.set("reportTrendGrain", trend.grain);
   if (view.period === "custom") {
     url.searchParams.set("reportFrom", view.customRange.from);
     url.searchParams.set("reportTo", view.customRange.to);
@@ -130,6 +167,12 @@ export function resetReportFilters(view) {
 
 export function updateReportFilter(view, key, value) {
   return { ...view, filters: { ...view.filters, [key]: value || "all" } };
+}
+
+export function normalizeReportTrend(trend) {
+  const grain = REPORT_TREND_GRAINS.has(trend?.grain) ? trend.grain : REPORT_TREND_DEFAULTS.grain;
+  const metric = REPORT_TREND_METRICS.has(trend?.metric) ? trend.metric : REPORT_TREND_DEFAULTS.metric;
+  return { grain, metric };
 }
 
 function localDateValue(date, offsetDays) {

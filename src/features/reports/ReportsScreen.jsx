@@ -99,8 +99,11 @@ export function ReportsScreen({ onBack, onToast, access }) {
           <div className="reports-evidence-layout">
             <main className="reports-primary-evidence">
               <section className="reports-panel reports-trend-panel">
-                <AccessibleTrendChart timeSeries={operations.timeSeries} />
-                {operations.timeSeries.aggregated ? <p className="reports-aggregation-note">Длинный произвольный период агрегирован по неделям, чтобы сохранить читаемость.</p> : null}
+                <AccessibleTrendChart
+                  explorer={operations.trendExplorer}
+                  onSelectionChange={(trend) => setView((current) => ({ ...current, trend }))}
+                  selection={view.trend}
+                />
               </section>
               <div className="reports-diagnostic-grid">
                 <ServiceLevelPanel serviceLevel={operations.serviceLevel} />

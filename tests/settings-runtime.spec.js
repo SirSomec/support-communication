@@ -391,19 +391,24 @@ test("reports runtime creates export retries failed jobs and downloads file byte
   await openAppShell(page, session);
   await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
   await openSection(page, "Отчеты");
-  await expect(page.locator(".export-queue-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Экспорт", exact: true }).click();
+  const exportDialog = page.getByRole("dialog", { name: "Экспорт отчетов" });
+  const exportHistory = exportDialog.getByTestId("report-export-history");
+  const exportJob = (job) => exportHistory.getByRole("article", { name: job.name, exact: true });
+  await expect(exportDialog).toBeVisible();
+  await expect(exportDialog.getByTestId("report-export-history-panel")).toBeVisible();
 
   const createExportPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/reports/exports") && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Экспорт XLSX" }).click();
+  await exportDialog.getByRole("button", { name: "Создать выгрузку", exact: true }).click();
   const createExportResponse = await createExportPromise;
   expect(createExportResponse.ok()).toBeTruthy();
   const createExportPayload = await createExportResponse.json();
   expect(createExportPayload.status).toBe("ok");
   expect(createExportPayload.data.job.backendQueueId).toBeTruthy();
   expect(createExportPayload.data.job.auditId).toBeTruthy();
-  await expect(page.locator(".export-job").filter({ hasText: createExportPayload.data.job.name }).first()).toBeVisible();
+  await expect(exportJob(createExportPayload.data.job)).toBeVisible();
 
   const retryableJobs = await request.get("/api/v1/reports/workspace", {
     headers: { authorization: `Bearer ${session.accessToken}` }
@@ -412,19 +417,18 @@ test("reports runtime creates export retries failed jobs and downloads file byte
   const retryablePayload = await retryableJobs.json();
   const retryableJob = retryablePayload.data.exportJobs.find((job) => ["error", "expired"].includes(job.statusKey));
   expect(retryableJob).toBeTruthy();
-  const retryButtonName = retryableJob.statusKey === "expired" ? "Сгенерировать" : "Retry";
-  const retryJobRow = page.locator(".export-job").filter({ hasText: retryableJob.name }).first();
+  const retryJobRow = exportJob(retryableJob);
   const retryExportPromise = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/reports/exports/${encodeURIComponent(retryableJob.id)}/retry`) && response.request().method() === "POST"
   );
-  await retryJobRow.getByRole("button", { name: retryButtonName }).click();
+  await retryJobRow.getByRole("button", { name: "Повторить", exact: true }).click();
   const retryExportResponse = await retryExportPromise;
   expect(retryExportResponse.ok()).toBeTruthy();
   const retryExportPayload = await retryExportResponse.json();
   expect(retryExportPayload.status).toBe("ok");
   expect(retryExportPayload.data.auditEvent?.id).toBeTruthy();
   expect(retryExportPayload.data.job.statusKey).toBe("queued");
-  await expect(retryJobRow).toContainText("Повторная подготовка");
+  await expect(retryJobRow).toContainText("В очереди");
 
   const readyJobs = await request.get("/api/v1/reports/workspace", {
     headers: { authorization: `Bearer ${session.accessToken}` }
@@ -433,7 +437,7 @@ test("reports runtime creates export retries failed jobs and downloads file byte
   const readyPayload = await readyJobs.json();
   const readyJob = readyPayload.data.exportJobs.find((job) => job.statusKey === "ready");
   expect(readyJob).toBeTruthy();
-  const readyJobRow = page.locator(".export-job").filter({ hasText: readyJob.name }).first();
+  const readyJobRow = exportJob(readyJob);
   const downloadResponsePromise = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/reports/exports/${encodeURIComponent(readyJob.id)}/download`) && response.request().method() === "GET"
   );

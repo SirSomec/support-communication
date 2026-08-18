@@ -150,15 +150,22 @@ async function activeElementSnapshot(page) {
   });
 }
 
-test("product sections expose loading/data/error states", async ({ page }) => {
+test("product sections expose meaningful primary screen state", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
 
   for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Аудит"]) {
     await openSection(page, section);
     const primaryStateStrip = page.locator(".product-screen > .screen-state-strip").first();
-    await expect(primaryStateStrip.locator(".screen-state-item")).toHaveCount(3);
-    await expect(primaryStateStrip).toContainText("Загрузка");
+    const stateItems = primaryStateStrip.locator(".screen-state-item");
+    await expect(stateItems).toHaveCount(3);
+
+    if (section === "Отчеты") {
+      await expect(stateItems.locator("span")).toHaveText(["Снимок", "Модель", "Источник"]);
+    } else {
+      await expect(primaryStateStrip).toContainText("Загрузка");
+    }
+
     await expectHealthyPage(page);
   }
 });

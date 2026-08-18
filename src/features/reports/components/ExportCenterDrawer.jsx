@@ -183,7 +183,7 @@ export function ExportCenterDrawer({ access, disabled = false, disabledReason = 
 function ExportJob({ job, onDownload, onRetry }) {
   const statusKey = job.statusKey ?? "queued";
   return (
-    <article className={`reports-export-job is-${statusKey}`}>
+    <article aria-label={job.name || "Отчёт"} className={`reports-export-job is-${statusKey}`}>
       <div className="reports-export-job-main">
         <span className="reports-file-icon"><FileClock aria-hidden="true" size={17} /></span>
         <span><strong>{job.name || "Отчёт"}</strong><small>{job.format} · {job.period} · {formatTimestamp(job.createdAt)}</small></span>

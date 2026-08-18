@@ -124,10 +124,20 @@ describe("settings runtime contracts", () => {
   it("manages tenant employee settings with role, group, channel and reset audit evidence", async () => {
     const repository = createSeededIdentityRepository();
     const settings = new SettingsEmployeeService(repository);
+    const agent = await repository.findTenantUser("usr-ns-agent");
+    assert.ok(agent);
+    await repository.saveTenantUser({
+      ...agent,
+      metadata: {
+        ...(agent.metadata ?? {}),
+        operatorAvatar: { kind: "preset", presetId: "operator-15" }
+      }
+    });
 
     const workspace = await settings.fetchEmployees({ tenantId: "tenant-northstar" });
     assert.equal(workspace.status, "ok");
     assert.ok(workspace.data.employees.length >= 1);
+    assert.equal(workspace.data.employees.find((employee) => employee.id === "usr-ns-agent")?.avatar, "/avatars/operator-15.png");
 
     const updated = await settings.updateEmployee("usr-ns-agent", {
       channels: ["Telegram", "MAX"],

@@ -22,7 +22,11 @@ describe("canonical routing workload adapter contracts", () => {
       ],
       queues: [queue({ memberIds: ["operator-invited"] }), queue({ id: "queue-foreign", tenantId: "tenant-b" })],
       teams: [team(), team({ id: "team-foreign", memberIds: ["operator-a"], tenantId: "tenant-b" })],
-      users: [user(), user({ id: "operator-invited", status: "invited" }), user({ id: "operator-b", tenantId: "tenant-b" })]
+      users: [
+        user({ metadata: { employeeSettings: { chatLimit: 7 }, operatorAvatar: { kind: "preset", presetId: "operator-06" } } }),
+        user({ id: "operator-invited", status: "invited" }),
+        user({ id: "operator-b", tenantId: "tenant-b" })
+      ]
     });
 
     const workload = await adapter.readWorkload("tenant-a");
@@ -32,6 +36,7 @@ describe("canonical routing workload adapter contracts", () => {
     assert.deepEqual(workload.operators[0], {
       availability: { online: null, source: "not_recorded" },
       avgFirstResponseSeconds: 0,
+      avatar: "/avatars/operator-06.png",
       channels: ["telegram"],
       chats: 2,
       id: "operator-a",
@@ -100,7 +105,7 @@ describe("canonical routing workload adapter contracts", () => {
       conversations: [conversation({ id: "waiting", operatorId: undefined, status: "queued" })],
       queues: [queue({ name: "Real support queue" })],
       teams: [team()],
-      users: [user()]
+      users: [user({ metadata: { employeeSettings: { chatLimit: 7 }, operatorAvatar: { kind: "preset", presetId: "operator-14" } } })]
     });
     const service = new RoutingService(RoutingRepository.inMemory(), adapter);
 
@@ -114,6 +119,7 @@ describe("canonical routing workload adapter contracts", () => {
       waiting: item.waiting
     })), [{ name: "Real support queue", queueId: "queue-support", waiting: 1 }]);
     assert.equal(response.data?.operators?.[0]?.availability?.source, "not_recorded");
+    assert.equal(response.data?.operators?.[0]?.avatar, "/avatars/operator-14.png");
   });
 
   // Возврат бота в очередь без свободных операторов: диалог обязан получить

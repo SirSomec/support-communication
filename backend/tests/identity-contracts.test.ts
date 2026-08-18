@@ -277,6 +277,32 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(login.data.tenantId, "tenant-volga");
   });
 
+  it("backfills and persists a preset avatar for legacy operators during tenant login", async () => {
+    const seeded = bootstrapIdentityState();
+    const legacyUser = seeded.tenantUsers.find((user) => user.id === "usr-volga-admin");
+    assert.ok(legacyUser);
+    const repository = RuntimeIdentityRepository.inMemory(bootstrapIdentityState({
+      tenantUsers: [{ ...legacyUser, metadata: undefined }]
+    }));
+    const legacy = await repository.findTenantUser("usr-volga-admin");
+    assert.equal(legacy?.metadata?.operatorAvatar, undefined);
+
+    const login = await new AuthService(repository).loginTenantOperator({
+      email: "sergey@volga.example",
+      password: "correct-password"
+    });
+
+    assert.equal(login.status, "ok");
+    assert.match(String(login.data.operator?.avatar), /^\/avatars\/operator-(?:0[1-9]|1\d|20)\.png$/);
+    assert.equal(login.data.operator?.avatarKind, "preset");
+
+    const persisted = await repository.findTenantUser("usr-volga-admin");
+    assert.deepEqual(persisted?.metadata?.operatorAvatar, {
+      kind: "preset",
+      presetId: login.data.operator?.avatarPresetId
+    });
+  });
+
   it("does not consume a valid invite when its tenant membership is missing", async () => {
     const repository = IdentityRepository.inMemory();
     const invite = await repository.createInviteToken({

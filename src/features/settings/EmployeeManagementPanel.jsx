@@ -4,6 +4,7 @@ import { ChannelBadge, ChannelList, ToolbarSearch } from "../../ui.jsx";
 import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { RoleMatrixModal } from "./RoleMatrixModal.jsx";
 import { settingsService } from "../../services/settingsService.js";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 
 const STATUS_LABELS = {
   active: "Активен",
@@ -426,7 +427,10 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 onClick={() => setSelectedEmployeeId(employee.id)}
                 type="button"
               >
-                <strong>{employee.employee}</strong>
+                <span className="employee-list-person">
+                  <OperatorAvatar avatar={employee.avatar} decorative name={employee.employee} size={30} />
+                  <strong>{employee.employee}</strong>
+                </span>
                 <span>
                   {employee.role} · {employee.group}
                   <em className={`employee-status-badge status-${employee.status}`}>{statusLabel(employee.status)}</em>

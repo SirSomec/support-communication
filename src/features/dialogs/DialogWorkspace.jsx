@@ -64,6 +64,7 @@ export function DialogWorkspace({
   return (
     <div className="cockpit">
       <ConversationList
+        assignees={assignees}
         conversations={conversations}
         allConversations={allThreads ?? allConversations}
         selectedId={selectedId}

@@ -8,6 +8,7 @@ import {
   hashServiceAdminToken,
   type IdentityCredentialAuditEvent,
   type IdentityPasswordCredential,
+  type IdentityTenantUser,
   isLegacyPasswordCredential,
   type StoredServiceAdminSession,
   type StoredTenantOperatorSession,
@@ -23,6 +24,15 @@ import {
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 import { createServiceMailOverrideResolver } from "../mail/service-mailer.js";
 import { type OperatorPresenceService } from "../presence/presence.service.js";
+import {
+  createFallbackOperatorAvatar,
+  operatorAvatarFromMetadata,
+  resolveOperatorAvatarUrl,
+  type OperatorAvatarDescriptor,
+  type OperatorAvatarPresetId,
+  validateOperatorAvatar,
+  withOperatorAvatarMetadata
+} from "./operator-avatar.js";
 
 const SERVICE = "authService";
 
@@ -79,6 +89,10 @@ interface TenantOperatorSessionContext {
   sessionId?: string;
   tenantId?: string;
   userId?: string;
+}
+
+interface TenantOperatorAvatarPayload {
+  avatar?: unknown;
 }
 
 interface AcceptInvitePayload {
@@ -178,12 +192,7 @@ export interface TenantOperatorLoginData {
     tenantId: string;
     tenantName: string;
   }>;
-  operator: {
-    email: string;
-    id: string;
-    name: string;
-    role: string;
-  } | null;
+  operator: TenantOperatorProfile | null;
   permissions: string[];
   tenantId: string | null;
   nextStep?: "otp";
@@ -191,12 +200,7 @@ export interface TenantOperatorLoginData {
 
 export interface TenantOperatorStateData {
   authenticated: boolean;
-  operator: {
-    email: string;
-    id: string;
-    name: string;
-    role: string;
-  } | null;
+  operator: TenantOperatorProfile | null;
   permissions: string[];
   sessionId: string | null;
   tenantId: string | null;
@@ -206,6 +210,20 @@ export interface TenantOperatorLogoutData {
   authenticated: false;
   revoked: boolean;
   sessionId: string | null;
+}
+
+export interface TenantOperatorProfile {
+  avatar: string;
+  avatarKind: OperatorAvatarDescriptor["kind"];
+  avatarPresetId?: OperatorAvatarPresetId;
+  email: string;
+  id: string;
+  name: string;
+  role: string;
+}
+
+export interface TenantOperatorAvatarData {
+  operator: TenantOperatorProfile | null;
 }
 
 export class AuthService {
@@ -1156,7 +1174,7 @@ export class AuthService {
     }
 
     const effectiveTenantId = selectedMembership?.tenantId ?? memberships[0]?.tenantId;
-    const effectiveTenantUser = membershipUsers.find((user) =>
+    let effectiveTenantUser = membershipUsers.find((user) =>
       user.tenantId === effectiveTenantId && user.status === "active"
     );
 
@@ -1179,6 +1197,11 @@ export class AuthService {
         }
       });
     }
+
+    // Historical users may predate avatar support. Persist their first preset
+    // as part of the authenticated flow, so subsequent client surfaces see a
+    // stable avatar rather than generating one independently.
+    effectiveTenantUser = await this.ensureTenantUserAvatar(effectiveTenantUser);
 
     const tenant = await this.identityRepository.findTenant(effectiveTenantUser.tenantId);
     if (tenant?.status === "restricted") {
@@ -1270,8 +1293,7 @@ export class AuthService {
       // Успешный OTP подтверждает второй фактор: статус в карточке сотрудника
       // снова становится «включена» (в том числе после ручного сброса MFA).
       if (effectiveTenantUser.mfa !== "enabled") {
-        await this.identityRepository.saveTenantUser({ ...effectiveTenantUser, mfa: "enabled" });
-        effectiveTenantUser.mfa = "enabled";
+        effectiveTenantUser = await this.identityRepository.saveTenantUser({ ...effectiveTenantUser, mfa: "enabled" });
       }
     }
 
@@ -1290,16 +1312,19 @@ export class AuthService {
       data: {
         accessToken: createdSession.accessToken,
         authenticated: true,
-        operator: {
-          email: effectiveTenantUser.email,
-          id: effectiveTenantUser.id,
-          name: effectiveTenantUser.name,
-          role: effectiveTenantUser.role
-        },
+        operator: serializeTenantOperatorProfile(effectiveTenantUser),
         permissions,
         tenantId: effectiveTenantUser.tenantId
       }
     });
+  }
+
+  private async ensureTenantUserAvatar(user: IdentityTenantUser): Promise<IdentityTenantUser> {
+    if (operatorAvatarFromMetadata(user.metadata)) {
+      return user;
+    }
+
+    return this.identityRepository.saveTenantUser(user);
   }
 
   private async upgradeLegacyPasswordCredential(
@@ -1364,7 +1389,10 @@ export class AuthService {
       throw new Error("Tenant operator session denial was not resolved.");
     }
 
-    const user = await this.identityRepository.findTenantUser(session.userId);
+    let user = await this.identityRepository.findTenantUser(session.userId);
+    if (user) {
+      user = await this.ensureTenantUserAvatar(user);
+    }
     const permissions = [...session.allowedActions];
 
     return createEnvelope({
@@ -1374,20 +1402,83 @@ export class AuthService {
       meta: apiMeta({ tenantId: session.tenantId }),
       data: {
         authenticated: true,
-        operator: user ? {
-          email: user.email,
-          id: user.id,
-          name: user.name,
-          role: user.role
-        } : {
+        operator: user ? serializeTenantOperatorProfile(user) : serializeTenantOperatorProfile({
           email: session.userEmail,
           id: session.userId,
           name: session.userName,
           role: session.role
-        },
+        }),
         permissions,
         sessionId: session.id,
         tenantId: session.tenantId
+      }
+    });
+  }
+
+  async updateTenantOperatorAvatar(
+    { avatar }: TenantOperatorAvatarPayload = {},
+    { tenantId, userId }: TenantOperatorSessionContext = {}
+  ): Promise<BackendEnvelope<TenantOperatorAvatarData>> {
+    const traceId = identityTraceId(SERVICE, "updateTenantOperatorAvatar");
+    if (!tenantId || !userId) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "updateTenantOperatorAvatar",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: { operator: null },
+        error: {
+          code: "tenant_operator_session_required",
+          message: "Tenant operator authentication is required."
+        }
+      });
+    }
+
+    const user = await this.identityRepository.findTenantUser(userId);
+    if (!user || user.tenantId !== tenantId) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "updateTenantOperatorAvatar",
+        traceId,
+        status: "denied",
+        meta: apiMeta({ tenantId }),
+        data: { operator: null },
+        error: {
+          code: "tenant_operator_not_available",
+          message: "Tenant operator account is not available."
+        }
+      });
+    }
+
+    const validation = validateOperatorAvatar(avatar);
+    if (!validation.ok) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "updateTenantOperatorAvatar",
+        traceId,
+        status: "invalid",
+        meta: apiMeta({ tenantId }),
+        data: { operator: null },
+        error: {
+          code: validation.code,
+          message: validation.message
+        }
+      });
+    }
+
+    const saved = await this.identityRepository.saveTenantUser({
+      ...user,
+      metadata: withOperatorAvatarMetadata(user.metadata, validation.avatar)
+    });
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "updateTenantOperatorAvatar",
+      traceId,
+      meta: apiMeta({ tenantId }),
+      data: {
+        operator: serializeTenantOperatorProfile(saved)
       }
     });
   }
@@ -1759,6 +1850,25 @@ export class AuthService {
     await this.identityRepository.recordCredentialAuditEvent(event);
     return event;
   }
+}
+
+function serializeTenantOperatorProfile(operator: {
+  email: string;
+  id: string;
+  metadata?: Record<string, unknown>;
+  name: string;
+  role: string;
+}): TenantOperatorProfile {
+  const avatar = operatorAvatarFromMetadata(operator.metadata) ?? createFallbackOperatorAvatar(operator.id);
+  return {
+    avatar: resolveOperatorAvatarUrl(avatar),
+    avatarKind: avatar.kind,
+    ...(avatar.kind === "preset" ? { avatarPresetId: avatar.presetId } : {}),
+    email: operator.email,
+    id: operator.id,
+    name: operator.name,
+    role: operator.role
+  };
 }
 
 function serializeTenantMemberships(memberships: IdentityTenantMembershipChoice[]): TenantOperatorLoginData["memberships"] {

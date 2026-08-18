@@ -5,6 +5,7 @@ import type { RealtimeEvent } from "../conversation/conversation.repository.js";
 import { ConversationRepository } from "../conversation/conversation.repository.js";
 import { createDisabledRealtimeFanoutAdapter, createRealtimeFanoutAdapterFromEnv, type RealtimeFanoutAdapter } from "../conversation/realtime.fanout.js";
 import { IdentityRepository, type IdentityRepositoryPort } from "../identity/identity.repository.js";
+import { operatorAvatarFromMetadata, resolveOperatorAvatarUrl } from "../identity/operator-avatar.js";
 import type { IdentityTenantUser } from "../identity/identity.types.js";
 import { OperatorPresenceRepository, type OperatorPresenceRepositoryPort } from "./operator-presence.repository.js";
 import {
@@ -213,7 +214,9 @@ export class OperatorPresenceService {
     const operators = activeUsers.map((user) => {
       const current = currentByOperator.get(user.id) ?? null;
       const seconds = secondsByOperator.get(user.id) ?? {};
+      const avatar = operatorAvatarUrlFromMetadata(user.metadata);
       return {
+        ...(avatar ? { avatar } : {}),
         name: user.name,
         operatorId: user.id,
         role: user.role,
@@ -285,6 +288,11 @@ export class OperatorPresenceService {
 
     return event;
   }
+}
+
+function operatorAvatarUrlFromMetadata(metadata: unknown): string | undefined {
+  const avatar = operatorAvatarFromMetadata(metadata);
+  return avatar ? resolveOperatorAvatarUrl(avatar) : undefined;
 }
 
 function presenceView(record: OperatorPresenceCurrentRecord): Record<string, unknown> {

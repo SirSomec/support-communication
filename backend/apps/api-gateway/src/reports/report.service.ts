@@ -26,6 +26,9 @@ import {
   type DialogTranscriptFormat
 } from "./report-dialog-transcripts.js";
 import { createSharedReportObjectStorage, type ReportObjectStorageDownloadSigner } from "./report-object-storage.js";
+import { IdentityRepository, type IdentityRepositoryPort } from "../identity/identity.repository.js";
+import { operatorAvatarFromMetadata, resolveOperatorAvatarUrl } from "../identity/operator-avatar.js";
+import type { IdentityTenantUser } from "../identity/identity.types.js";
 import type { MetricReportExportFormat, ReportExportJob } from "./report.types.js";
 import {
   ReportRepository,
@@ -135,11 +138,13 @@ interface ReportQueryPayload {
 }
 
 interface ReportServiceOptions {
+  identityRepository?: Pick<IdentityRepositoryPort, "findTenantUsers">;
   now?: () => Date;
   objectStorage?: ReportObjectStorageReader & Partial<ReportObjectStorageWriter & ReportObjectStorageDownloadSigner>;
 }
 
 export class ReportService {
+  private readonly identityRepository: Pick<IdentityRepositoryPort, "findTenantUsers">;
   private readonly idempotencyIndex: Map<string, { fingerprint: string; jobId: string }>;
   private readonly now: () => Date;
   private readonly objectStorage: ReportObjectStorageReader & Partial<ReportObjectStorageWriter & ReportObjectStorageDownloadSigner>;
@@ -153,6 +158,7 @@ export class ReportService {
       reportTenantIdempotencyKey(item.tenantId, item.key),
       { fingerprint: item.fingerprint, jobId: item.jobId }
     ]));
+    this.identityRepository = options.identityRepository ?? IdentityRepository.default();
     this.now = options.now ?? (() => new Date());
     this.objectStorage = options.objectStorage ?? createSharedReportObjectStorage(process.env);
   }
@@ -246,6 +252,7 @@ export class ReportService {
       to: to.getTime()
     }));
     const aggregates = aggregateRoutingActivityByOperator(rows, operatorId);
+    const operatorAvatars = await this.operatorAvatarUrls(tenantId);
 
     return createEnvelope({
       service: REPORT_SERVICE,
@@ -271,7 +278,7 @@ export class ReportService {
         },
         hasActivity: rows.length > 0,
         periodLabel: workspace.periodLabel,
-        rows: aggregates.rows,
+        rows: withOperatorAvatarUrls(aggregates.rows, operatorAvatars),
         source: "routing_analytics_rows",
         totals: {
           assignments: rows.filter((row) => row.eventKind === "assignment").length,
@@ -313,6 +320,10 @@ export class ReportService {
       );
     }
     const liveWorkspace = reportSource.workspace;
+    const operations = withSupportOperationsOperatorAvatars(
+      reportSource.operations,
+      await this.operatorAvatarUrls(tenantId)
+    );
     const hasConversationActivity = liveWorkspace.current.newConversations > 0
       || liveWorkspace.previous.newConversations > 0
       || liveWorkspace.current.closedConversations > 0
@@ -332,7 +343,7 @@ export class ReportService {
       partial: false,
       meta: apiMeta({ filters }),
       data: {
-        operations: reportSource.operations,
+        operations,
         rows: reportRows,
         bars: clone(liveWorkspace.bars),
         chartBlocks: hasConversationActivity ? clone(liveWorkspace.chartBlocks) : [],
@@ -379,6 +390,22 @@ export class ReportService {
         windows: liveWorkspace.windows
       }
     });
+  }
+
+  private async operatorAvatarUrls(tenantId: string): Promise<Map<string, string>> {
+    try {
+      const users = await this.identityRepository.findTenantUsers(tenantId);
+      const urls = new Map<string, string>();
+      for (const user of users) {
+        if (user.tenantId !== tenantId) continue;
+        const avatar = operatorAvatarUrlFromMetadata(user.metadata);
+        if (avatar) urls.set(user.id, avatar);
+      }
+      return urls;
+    } catch {
+      // Reporting must remain available when the adjacent identity projection is unavailable.
+      return new Map();
+    }
   }
 
   private async buildTenantConversationWorkspace(
@@ -1733,6 +1760,38 @@ function aggregateRoutingActivityByOperator(rows: RoutingActivityReportSourceRow
       .sort((left, right) => right.totalEvents - left.totalEvents || left.operatorId.localeCompare(right.operatorId)),
     unattributedEvents
   };
+}
+
+function withSupportOperationsOperatorAvatars(
+  workspace: SupportOperationsWorkspace,
+  avatarUrls: ReadonlyMap<string, string>
+): SupportOperationsWorkspace {
+  if (!avatarUrls.size) return workspace;
+  return {
+    ...workspace,
+    breakdowns: {
+      ...workspace.breakdowns,
+      operators: workspace.breakdowns.operators.map((operator) => {
+        const avatar = operator.operatorId ? avatarUrls.get(operator.operatorId) : undefined;
+        return avatar ? { ...operator, avatar } : operator;
+      })
+    }
+  };
+}
+
+function withOperatorAvatarUrls<Row extends { operatorId: string }>(
+  rows: readonly Row[],
+  avatarUrls: ReadonlyMap<string, string>
+): Array<Row & { avatar?: string }> {
+  return rows.map((row) => {
+    const avatar = avatarUrls.get(row.operatorId);
+    return avatar ? { ...row, avatar } : row;
+  });
+}
+
+function operatorAvatarUrlFromMetadata(metadata: IdentityTenantUser["metadata"]): string | undefined {
+  const avatar = operatorAvatarFromMetadata(metadata);
+  return avatar ? resolveOperatorAvatarUrl(avatar) : undefined;
 }
 
 function currentConversationMetricRows(reportRows: unknown[]): Array<Record<string, unknown>> {

@@ -4,11 +4,11 @@ import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
 import { PRESENCE_STATUSES, PRESENCE_STATUS_NOT_SET_LABEL, presenceStatusClass, presenceStatusLabel } from "../../app/presenceModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 import "./app-shell.css";
 
-export function Sidebar({ active, access, collapsed = false, onSelect, onToggleCollapsed, operator, presenceStatus = "" }) {
+export function Sidebar({ active, access, avatarActionDisabled = false, collapsed = false, onAvatarClick, onSelect, onToggleCollapsed, operator, presenceStatus = "" }) {
   const operatorName = operator?.name || operator?.email || "Сотрудник";
-  const operatorInitials = buildInitials(operatorName);
 
   return (
     <aside className={`sidebar ${collapsed ? "sidebar-collapsed" : ""}`} id="workspace-sidebar">
@@ -56,7 +56,16 @@ export function Sidebar({ active, access, collapsed = false, onSelect, onToggleC
         ))}
       </nav>
       <div className="operator-card">
-        <span className="operator-avatar" aria-hidden="true">{operatorInitials}</span>
+        <button
+          aria-label="Изменить аватар"
+          className="operator-profile-trigger"
+          disabled={avatarActionDisabled}
+          onClick={onAvatarClick}
+          title={avatarActionDisabled ? "В режиме просмотра изменение профиля недоступно" : "Выбрать аватар"}
+          type="button"
+        >
+          <OperatorAvatar avatar={operator?.avatar} decorative name={operatorName} size={32} />
+        </button>
         <div>
           <strong>{operatorName}</strong>
           <span className="operator-card-presence">
@@ -160,15 +169,6 @@ export function TopBar({
       </div>
     </header>
   );
-}
-
-function buildInitials(name) {
-  return String(name)
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "--";
 }
 
 function conversationWord(count) {

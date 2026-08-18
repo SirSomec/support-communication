@@ -14,6 +14,7 @@ import { createScreenStateItems } from "../../app/screenState.js";
 import { presenceService } from "../../services/presenceService.js";
 import { routingService } from "../../services/routingService.js";
 import { ChannelBadge, ChannelList, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 
 const PRESENCE_TICK_INTERVAL_MS = 30000;
 
@@ -307,7 +308,10 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null, 
               return (
                 <div className="operator-row" key={operator.id ?? operator.name}>
                   <span className={`operator-presence ${presence.cssClass}`} />
-                  <strong className="operator-name">{operator.name}</strong>
+                  <div className="operator-name-cell">
+                    <OperatorAvatar avatar={operator.avatar} decorative name={operator.name} size={28} />
+                    <strong className="operator-name">{operator.name}</strong>
+                  </div>
                   <span className="operator-status">{presence.label}</span>
                   <span className="operator-status-duration" title="Время в текущем статусе">{presence.duration}</span>
                   <div className="load-meter">
@@ -365,7 +369,10 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null, 
               </div>
               {teamPresenceOperators.map((row) => (
                 <div className="presence-summary-row" key={row.operatorId} role="row">
-                  <strong role="cell">{row.name}</strong>
+                  <span className="operator-name-with-avatar" role="cell">
+                    <OperatorAvatar avatar={row.avatar} decorative name={row.name} size={26} />
+                    <strong>{row.name}</strong>
+                  </span>
                   <span className="presence-summary-status" role="cell">
                     <i className={`operator-presence ${presenceStatusClass(row.status)}`} aria-hidden="true" />
                     {row.status ? presenceStatusLabel(row.status) : PRESENCE_STATUS_NOT_SET_LABEL}

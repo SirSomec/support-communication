@@ -22,7 +22,7 @@ function operatorContext(actorId: string) {
   return { actorId, actorType: "operator" as const, tenantId: TENANT };
 }
 
-function createIdentityStub(users: Array<{ id: string; name: string; role?: string; status?: string }>) {
+function createIdentityStub(users: Array<{ id: string; metadata?: Record<string, unknown>; name: string; role?: string; status?: string }>) {
   return {
     async findTenantUsers() {
       return users.map((user) => ({
@@ -31,6 +31,7 @@ function createIdentityStub(users: Array<{ id: string; name: string; role?: stri
         id: user.id,
         inviteStatus: "accepted",
         lastActiveAt: null,
+        ...(user.metadata ? { metadata: user.metadata } : {}),
         mfa: "none",
         name: user.name,
         risk: "low",
@@ -320,7 +321,12 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       const service = new OperatorPresenceService({
         conversationRepository: createRealtimeSinks().conversationRepository,
         identityRepository: createIdentityStub([
-          { id: "operator-anna", name: "Anna R.", role: "Оператор" },
+          {
+            id: "operator-anna",
+            metadata: { operatorAvatar: { kind: "preset", presetId: "operator-12" } },
+            name: "Anna R.",
+            role: "Оператор"
+          },
           { id: "operator-ivan", name: "Ivan P.", role: "Старший смены" }
         ]),
         presenceRepository,
@@ -336,7 +342,8 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       const operators = envelope.data.operators as Array<Record<string, unknown>>;
       assert.deepEqual(operators.map((operator) => operator.operatorId), ["operator-anna", "operator-ivan"]);
 
-      const anna = operators[0] as { seconds: Record<string, number>; since: string; status: string; trackedSeconds: number };
+      const anna = operators[0] as { avatar?: string; seconds: Record<string, number>; since: string; status: string; trackedSeconds: number };
+      assert.equal(anna.avatar, "/avatars/operator-12.png");
       assert.equal(anna.status, "break");
       assert.equal(anna.seconds.online, 600);
       assert.equal(anna.seconds.break, 300);

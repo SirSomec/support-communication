@@ -4,6 +4,7 @@ import { identityPermissionRoleCatalog, identityServiceAdminTariffCatalog, servi
 import { createEmptyIdentityState, hashPasswordCredential, IdentityRepository, type IdentityPasswordCredential, type IdentityState } from "./identity.repository.js";
 import type { IdentityServiceAdminFeatureFlag, IdentityServiceAdminIncident, IdentityTenant, IdentityTenantAuditEvent, IdentityTenantUser } from "./identity.types.js";
 import { featureFlags, incidents, serviceAdminSession, tenantAuditEvents, tenants, tenantUsers } from "./seed-catalog.js";
+import { withDefaultOperatorAvatarMetadata } from "./operator-avatar.js";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -21,7 +22,10 @@ export function bootstrapIdentityState(base?: Partial<IdentityState>): IdentityS
     serviceAdminIncidents: base?.serviceAdminIncidents ?? clone(incidents) as IdentityServiceAdminIncident[],
     serviceAdminTariffs: base?.serviceAdminTariffs ?? clone(identityServiceAdminTariffCatalog),
     tenantAuditEvents: base?.tenantAuditEvents ?? clone(tenantAuditEvents) as IdentityTenantAuditEvent[],
-    tenantUsers: base?.tenantUsers ?? clone(tenantUsers) as IdentityTenantUser[],
+    tenantUsers: base?.tenantUsers ?? (clone(tenantUsers) as IdentityTenantUser[]).map((user) => ({
+      ...user,
+      metadata: withDefaultOperatorAvatarMetadata(user.metadata)
+    })),
     tenants: base?.tenants ?? clone(tenants) as IdentityTenant[]
   };
 }

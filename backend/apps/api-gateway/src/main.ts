@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { loadBackendConfig, parseAllowedOrigins } from "@support-communication/config";
 import { writeStructuredLog } from "@support-communication/observability";
 import { AppModule } from "./app.module.js";
@@ -61,10 +62,14 @@ export async function bootstrap(): Promise<void> {
   configureQualityRepository(config, { seed: localSeeds.quality });
   configureQualityScoringRepository(config);
   configureOperationsRepository(config, { seed: localSeeds.operations });
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true
   });
 
+  // A 2 MiB binary image expands to roughly 2.67 MiB in a JSON data URL.
+  // Keep the HTTP limit close to the avatar contract rather than accepting
+  // arbitrary large request bodies across the API.
+  app.useBodyParser("json", { limit: "3mb" });
   app.enableShutdownHooks();
   app.setGlobalPrefix(`api/${config.API_VERSION}`);
   app.useGlobalFilters(new EnvelopeHttpExceptionFilter());

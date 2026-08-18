@@ -30,10 +30,21 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     const repository = ConversationRepository.inMemory();
     const identityRepository = IdentityRepository.inMemory();
     const conversations = new ConversationService(repository, { identityRepository });
+    const seededOperator = (await identityRepository.findTenantUsers("tenant-volga")).find((user) => user.status === "active");
+    assert.ok(seededOperator);
+    await identityRepository.saveTenantUser({
+      ...seededOperator,
+      metadata: {
+        ...(seededOperator.metadata ?? {}),
+        operatorAvatar: { kind: "preset", presetId: "operator-04" }
+      }
+    });
     const assignees = await conversations.fetchAssignees({ tenantId: "tenant-volga" });
-    const operator = (assignees.data.items as Array<{ id: string; name: string }>)[0];
+    const operator = (assignees.data.items as Array<{ avatar?: string; id: string; name: string }>)
+      .find((item) => item.id === seededOperator.id);
 
     assert.ok(operator);
+    assert.equal(operator.avatar, "/avatars/operator-04.png");
     const assigned = await conversations.assignConversation({
       conversationId: "maria",
       operatorId: operator.id,

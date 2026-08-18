@@ -21,8 +21,10 @@ export function mergeReportOperatorRows(workloadRows, routingRows, options = {})
     if (!row || typeof row !== "object") continue;
     const id = cleanText(row.operatorId) ?? cleanText(row.key) ?? cleanText(row.id) ?? `routing:${index}`;
     const routingLabel = preferredOperatorLabel(row, id);
-    const operator = byId.get(id) ?? emptyOperator(id, routingLabel, row.identityStatus);
+    const routingAvatar = operatorAvatar(row);
+    const operator = byId.get(id) ?? emptyOperator(id, routingLabel, row.identityStatus, routingAvatar);
     improveOperatorLabel(operator, routingLabel);
+    if (!operator.avatar && routingAvatar) operator.avatar = routingAvatar;
     if (normalizeIdentityStatus(row.identityStatus) === "unattributed") operator.unattributed = true;
 
     const transfers = routingTransferEvidence(row);
@@ -50,6 +52,7 @@ function workloadOperator(row, id) {
   const sourceLabel = preferredOperatorLabel(row, id);
   const nameOnly = !cleanText(row.operatorId) && id.toLocaleLowerCase("ru-RU").startsWith(LEGACY_NAME_PREFIX);
   return {
+    avatar: operatorAvatar(row),
     backlog: metricEvidence(row, ["assignedBacklog", "backlog"]),
     firstResponse: metricEvidence(row, ["firstResponseMedianSeconds", "firstResponse"]),
     id,
@@ -63,8 +66,9 @@ function workloadOperator(row, id) {
   };
 }
 
-function emptyOperator(id, sourceLabel, identityStatus) {
+function emptyOperator(id, sourceLabel, identityStatus, avatar = null) {
   return {
+    avatar,
     backlog: missingEvidence(),
     firstResponse: missingEvidence(),
     id,
@@ -82,6 +86,7 @@ function fillMissingWorkload(target, fallback) {
     if (!target[key].measured && fallback[key].measured) target[key] = fallback[key];
   }
   improveOperatorLabel(target, fallback.sourceLabel);
+  if (!target.avatar && fallback.avatar) target.avatar = fallback.avatar;
   if (fallback.unattributed) target.unattributed = true;
 }
 
@@ -98,6 +103,7 @@ function finalizeOperator(operator) {
     ? "unattributed"
     : operator.nameOnly ? "name-only" : "canonical";
   return {
+    avatar: operator.avatar ?? null,
     backlog: operator.backlog.measured ? operator.backlog.value : 0,
     firstResponse: operator.firstResponse.measured ? operator.firstResponse.value : null,
     id: operator.id,
@@ -110,6 +116,11 @@ function finalizeOperator(operator) {
     touches: operator.touches.measured ? operator.touches.value : 0,
     transfers: operator.transfers.measured ? operator.transfers.value : null
   };
+}
+
+function operatorAvatar(row) {
+  const avatar = typeof row?.avatar === "string" ? row.avatar.trim() : "";
+  return avatar || null;
 }
 
 function preferredOperatorLabel(row, id) {

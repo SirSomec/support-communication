@@ -1929,6 +1929,20 @@
   font-size: 12px;
 }
 
+.employee-selector-list .employee-list-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+}
+
+.employee-list-person strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .employee-empty {
   padding: 16px;
 }
@@ -2251,6 +2265,13 @@
 
 .group-member-name {
   font-weight: 600;
+}
+
+.group-member-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .group-member-meta {

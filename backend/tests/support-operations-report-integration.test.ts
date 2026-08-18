@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { IdentityTenantUser } from "../apps/api-gateway/src/identity/identity.types.ts";
 import { ReportRepository, type ConversationReportSourceRow } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
 import type { SupportOperationsWorkspace } from "../apps/api-gateway/src/reports/support-operations-workspace.ts";
@@ -98,6 +99,42 @@ describe("support operations report service integration", () => {
       from: "2026-06-30T21:00:00.000Z",
       to: "2026-07-03T21:00:00.000Z"
     });
+  });
+
+  it("adds a resolved tenant operator avatar to operational workload records", async () => {
+    const repository = ReportRepository.inMemory();
+    repository.listSupportOperationsSourceRowsAsync = async () => [
+      row("avatar", "2026-08-18T08:00:00.000Z", "2026-08-18T08:05:00.000Z", {
+        messages: [message("avatar-agent", "2026-08-18T08:01:00.000Z", "agent")]
+      })
+    ];
+    const user: IdentityTenantUser = {
+      device: "desktop",
+      email: "operator-1@example.test",
+      id: "operator-1",
+      inviteStatus: "accepted",
+      lastActiveAt: null,
+      metadata: { operatorAvatar: { kind: "preset", presetId: "operator-18" } },
+      mfa: "enabled",
+      name: "Alex",
+      risk: "low",
+      role: "employee",
+      sessions: 1,
+      status: "active",
+      supportNotes: "",
+      tenantId: "tenant-volga"
+    };
+    const service = new ReportService(repository, {
+      identityRepository: { findTenantUsers: async () => [user] },
+      now: () => SNAPSHOT_AT
+    });
+
+    const response = await service.fetchReportWorkspace({ period: "today" }, { tenantId: "tenant-volga" });
+    const operations = response.data.operations as SupportOperationsWorkspace;
+    const operator = operations.breakdowns.operators.find((item) => item.operatorId === "operator-1");
+
+    assert.equal(response.status, "ok");
+    assert.equal(operator?.avatar, "/avatars/operator-18.png");
   });
 
   it("honors persisted resolution outcomes and historical operator participation after reassignment", async () => {

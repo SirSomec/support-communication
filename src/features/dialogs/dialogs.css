@@ -566,6 +566,9 @@
 }
 
 .assignment-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: #405069;
   font-size: 12px;
   font-weight: 750;
@@ -1041,6 +1044,20 @@
 .bot-handoff-summary header {
   justify-content: space-between;
   color: #17233a;
+}
+
+.queue-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: #52657e;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.queue-assignee .operator-avatar {
+  box-shadow: 0 0 0 1px #d9e5f2;
 }
 
 .bot-handoff-summary header span {

@@ -219,7 +219,7 @@ select:disabled {
     grid-area: presence;
   }
 
-  .operator-row .operator-name {
+  .operator-row .operator-name-cell {
     grid-area: name;
   }
 

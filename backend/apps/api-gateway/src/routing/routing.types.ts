@@ -1,6 +1,8 @@
 export interface RoutingOperator {
   /** Recorded when the presence source is known; canonical adapter marks "not_recorded". */
   availability?: { online: boolean | null; source: string };
+  /** Optional profile image resolved from the tenant user's avatar descriptor. */
+  avatar?: string;
   avgFirstResponseSeconds: number;
   channels: string[];
   chats: number;

@@ -1,0 +1,21 @@
+.operator-avatar {
+  display: grid;
+  width: var(--operator-avatar-size, 32px);
+  height: var(--operator-avatar-size, 32px);
+  flex: 0 0 var(--operator-avatar-size, 32px);
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #dbeafe;
+  color: #285b96;
+  font-size: calc(var(--operator-avatar-size, 32px) * .35);
+  font-weight: 800;
+  line-height: 1;
+  object-fit: cover;
+  user-select: none;
+}
+
+.operator-avatar-fallback {
+  background: linear-gradient(135deg, #3b82f6, #7c3aed);
+  color: #fff;
+}

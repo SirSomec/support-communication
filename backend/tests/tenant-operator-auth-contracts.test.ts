@@ -79,6 +79,14 @@ describe("tenant operator auth contracts", () => {
     assert.equal(stateEnvelope.data.tenantId, PILOT_TENANT_ID);
     assert.equal(typeof stateEnvelope.data.operator, "object");
     assert.equal((stateEnvelope.data.operator as Record<string, unknown>).email, PILOT_OPERATOR_EMAIL);
+    assert.match(
+      String((loginEnvelope.data.operator as Record<string, unknown>).avatar),
+      /^\/avatars\/operator-(?:0[1-9]|1\d|20)\.png$/
+    );
+    assert.equal(
+      (stateEnvelope.data.operator as Record<string, unknown>).avatar,
+      (loginEnvelope.data.operator as Record<string, unknown>).avatar
+    );
 
     const selectionResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/select`, {
       method: "POST",
@@ -103,6 +111,86 @@ describe("tenant operator auth contracts", () => {
       headers: { authorization: `Bearer ${accessToken}` }
     });
     assert.equal(revokedStateResponse.status, 401);
+  });
+
+  it("updates the authenticated operator avatar and preserves other metadata", async () => {
+    const { baseUrl, repository } = await createTestApiApp(apps);
+    const loginResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: PILOT_OPERATOR_EMAIL,
+        password: PILOT_OPERATOR_PASSWORD
+      })
+    });
+    const loginEnvelope = await loginResponse.json() as { data: Record<string, unknown> };
+    const accessToken = String(loginEnvelope.data.accessToken);
+
+    const presetResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/avatar`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        // The authenticated subject, not body-supplied identity fields, owns the update.
+        tenantId: "tenant-untrusted",
+        userId: "usr-untrusted",
+        avatar: { kind: "preset", presetId: "operator-20" }
+      })
+    });
+    const presetEnvelope = await presetResponse.json() as { data: Record<string, unknown>; status: string };
+    const presetOperator = presetEnvelope.data.operator as Record<string, unknown>;
+
+    assert.equal(presetResponse.status, 200);
+    assert.equal(presetEnvelope.status, "ok");
+    assert.equal(presetOperator.avatar, "/avatars/operator-20.png");
+    assert.equal(presetOperator.avatarKind, "preset");
+    assert.equal(presetOperator.avatarPresetId, "operator-20");
+
+    const customAvatar = "data:image/png;base64,iVBORw0KGgo=";
+    const customResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/avatar`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ avatar: { dataUrl: customAvatar, kind: "custom" } })
+    });
+    const customEnvelope = await customResponse.json() as { data: Record<string, unknown>; status: string };
+    const customOperator = customEnvelope.data.operator as Record<string, unknown>;
+
+    assert.equal(customResponse.status, 200);
+    assert.equal(customEnvelope.status, "ok");
+    assert.equal(customOperator.avatar, customAvatar);
+    assert.equal(customOperator.avatarKind, "custom");
+    assert.equal(customOperator.avatarPresetId, undefined);
+
+    const stateResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/state`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+    const stateEnvelope = await stateResponse.json() as { data: Record<string, unknown> };
+    assert.equal((stateEnvelope.data.operator as Record<string, unknown>).avatar, customAvatar);
+
+    const invalidResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/avatar`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ avatar: { kind: "preset", presetId: "operator-99" } })
+    });
+    const invalidEnvelope = await invalidResponse.json() as {
+      error: { code: string };
+      status: string;
+    };
+    assert.equal(invalidResponse.status, 200);
+    assert.equal(invalidEnvelope.status, "invalid");
+    assert.equal(invalidEnvelope.error.code, "operator_avatar_invalid");
+
+    const stored = await repository.findTenantUser(PILOT_OPERATOR_USER_ID);
+    assert.equal(stored?.metadata?.preferredLocale, "ru");
+    assert.deepEqual(stored?.metadata?.operatorAvatar, { dataUrl: customAvatar, kind: "custom" });
   });
 
   it("completes tenant operator MFA challenge when pilot skip is disabled", async () => {
@@ -171,7 +259,7 @@ describe("tenant operator auth contracts", () => {
 async function createTestApiApp(
   apps: INestApplication[],
   options: { nodeEnv?: string; skipTenantMfa?: boolean } = {}
-): Promise<{ app: INestApplication; baseUrl: string }> {
+): Promise<{ app: INestApplication; baseUrl: string; repository: IdentityRepository }> {
   process.env.NODE_ENV = options.nodeEnv ?? "test";
   process.env.API_VERSION = "v1";
   process.env.DATABASE_URL = "https://example.invalid/database";
@@ -203,7 +291,8 @@ async function createTestApiApp(
 
   return {
     app,
-    baseUrl: `http://127.0.0.1:${address.port}`
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    repository
   };
 }
 
@@ -214,6 +303,7 @@ async function seedPilotOperator(repository: IdentityRepository): Promise<void> 
     id: PILOT_OPERATOR_USER_ID,
     inviteStatus: "accepted",
     lastActiveAt: new Date().toISOString(),
+    metadata: { preferredLocale: "ru" },
     mfa: "enabled",
     name: "Pilot Operator",
     risk: "low",

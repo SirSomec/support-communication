@@ -3,6 +3,7 @@ import { Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react";
 import { ChannelBadge } from "../../ui.jsx";
 import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { settingsService } from "../../services/settingsService.js";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 
 const emptyDraft = { channels: ["SDK"], groupId: "", memberIds: [], name: "", scope: "" };
 
@@ -266,7 +267,10 @@ export function GroupManagementPanel({ access, canEditSettings, onSummaryChange,
                   onChange={() => toggleDraftMember(employee.id)}
                   type="checkbox"
                 />
-                <span className="group-member-name">{employee.employee ?? employee.name}</span>
+                <span className="group-member-person">
+                  <OperatorAvatar avatar={employee.avatar} decorative name={employee.employee ?? employee.name} size={24} />
+                  <span className="group-member-name">{employee.employee ?? employee.name}</span>
+                </span>
                 <span className="group-member-meta">{employee.role} · {employee.groupName ?? employee.group}</span>
               </label>
             ))}

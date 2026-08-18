@@ -86,6 +86,10 @@ describe("tenant provision session contracts", () => {
     assert.equal(tenantLoginEnvelope.data.tenantId, "tenant-acme-pilot");
     assert.equal(Array.isArray(tenantLoginEnvelope.data.permissions), true);
     assert.equal((tenantLoginEnvelope.data.permissions as string[]).includes("*"), true);
+    assert.match(
+      String((tenantLoginEnvelope.data.operator as Record<string, unknown>).avatar),
+      /^\/avatars\/operator-(?:0[1-9]|1\d|20)\.png$/
+    );
   });
 });
 

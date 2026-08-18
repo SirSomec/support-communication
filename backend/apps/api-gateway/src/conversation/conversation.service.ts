@@ -25,6 +25,7 @@ import { createObjectStorageSigner } from "../workspace/object-storage.js";
 import type { ObjectStorageSigner, SignedObjectStorageUrl } from "../workspace/workspace.service.js";
 import { WorkspaceRepository, type FileRecord } from "../workspace/workspace.repository.js";
 import { IdentityRepository } from "../identity/identity.repository.js";
+import { operatorAvatarFromMetadata, resolveOperatorAvatarUrl } from "../identity/operator-avatar.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
 import { AutomationRepository } from "../automation/automation.repository.js";
 import { conversationCsatFeedback } from "../quality/csat-feedback.js";
@@ -556,11 +557,15 @@ export class ConversationService {
     const users = await this.identityRepository.findTenantUsers(tenantId);
     const items = users
       .filter((user) => user.status === "active")
-      .map((user) => ({
-        id: user.id,
-        name: user.name,
-        role: user.role
-      }));
+      .map((user) => {
+        const avatar = operatorAvatarUrlFromMetadata(user.metadata);
+        return {
+          id: user.id,
+          name: user.name,
+          role: user.role,
+          ...(avatar ? { avatar } : {})
+        };
+      });
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -2149,6 +2154,11 @@ export class ConversationService {
       traceId: realtimeEvent.traceId
     };
   }
+}
+
+function operatorAvatarUrlFromMetadata(metadata: unknown): string | undefined {
+  const avatar = operatorAvatarFromMetadata(metadata);
+  return avatar ? resolveOperatorAvatarUrl(avatar) : undefined;
 }
 
 function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {

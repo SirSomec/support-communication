@@ -68,6 +68,15 @@ export const authService = {
     });
   },
 
+  async updateTenantOperatorAvatar(payload = {}) {
+    return apiRequest("/auth/tenant/avatar", {
+      body: payload,
+      method: "POST",
+      operation: "updateTenantOperatorAvatar",
+      service: SERVICE
+    });
+  },
+
   async logoutTenant(payload = {}) {
     return apiRequest("/auth/tenant/logout", {
       body: payload,
@@ -169,6 +178,7 @@ export const authService = {
         "logout",
         "loginTenantOperator",
         "getTenantOperatorState",
+        "updateTenantOperatorAvatar",
         "logoutTenant",
         "startOidcLogin",
         "completeOidcCallback",

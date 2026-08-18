@@ -1,6 +1,7 @@
 import { ConversationRepository } from "../conversation/conversation.repository.js";
 import type { ConversationRecord } from "../conversation/conversation.types.js";
 import { IdentityRepository, type IdentityRepositoryPort } from "../identity/identity.repository.js";
+import { operatorAvatarFromMetadata, resolveOperatorAvatarUrl } from "../identity/operator-avatar.js";
 import type { IdentityTenantUser } from "../identity/identity.types.js";
 import { TeamDirectoryRepository, type TeamDirectoryRecord } from "../identity/team-directory.repository.js";
 import { QueueDirectoryRepository, type QueueDirectoryRecord } from "./queue-directory.repository.js";
@@ -98,11 +99,13 @@ function toRoutingOperator(
   const teamIds = new Set(operatorTeams.map((team) => team.id));
   const operatorQueues = queues.filter((queue) => queue.memberIds.includes(user.id) || Boolean(queue.defaultTeamId && teamIds.has(queue.defaultTeamId)));
   const limit = chatLimitFromMetadata(user.metadata);
+  const avatar = operatorAvatarUrlFromMetadata(user.metadata);
   const overdue = assigned.filter(isOverdue).length;
 
   return {
     availability: { online: null, source: "not_recorded" },
     avgFirstResponseSeconds: 0,
+    ...(avatar ? { avatar } : {}),
     channels: uniqueSorted(operatorTeams.flatMap((team) => team.channels)),
     chats: assigned.length,
     id: user.id,
@@ -180,6 +183,11 @@ function chatLimitFromMetadata(metadata: Record<string, unknown> | undefined): n
   if (!employeeSettings || typeof employeeSettings !== "object" || Array.isArray(employeeSettings)) return undefined;
   const value = (employeeSettings as Record<string, unknown>).chatLimit;
   return Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+}
+
+function operatorAvatarUrlFromMetadata(metadata: unknown): string | undefined {
+  const avatar = operatorAvatarFromMetadata(metadata);
+  return avatar ? resolveOperatorAvatarUrl(avatar) : undefined;
 }
 
 function percentage(numerator: number, denominator: number): number {

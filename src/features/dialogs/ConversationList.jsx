@@ -9,10 +9,12 @@ import {
   statusLabels
 } from "../../app/dialogModel.js";
 import { StatusBadge } from "../../ui.jsx";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { Avatar } from "./Avatar.jsx";
 
 export function ConversationList({
+  assignees = [],
   conversations,
   allConversations,
   selectedId,
@@ -61,6 +63,10 @@ export function ConversationList({
   };
   const page = pagination?.page ?? 1;
   const total = pagination?.total ?? allConversations.length;
+  const assigneeById = useMemo(
+    () => new Map(assignees.filter((assignee) => assignee?.id).map((assignee) => [assignee.id, assignee])),
+    [assignees]
+  );
 
   return (
     <section className="conversation-list" aria-label="Список диалогов">
@@ -154,6 +160,8 @@ export function ConversationList({
       <div className="queue-items">
         {conversations.map((conversation) => {
           const qualityAssessment = getConversationQualityAssessment(conversation);
+          const assignee = assigneeById.get(conversation.operatorId);
+          const assigneeName = assignee?.name || conversation.operatorName || "Не назначен";
           return (
           <button
             aria-current={selectedId === conversation.id ? "true" : undefined}
@@ -193,6 +201,12 @@ export function ConversationList({
                 ) : null}
               </span>
               <StatusBadge tone={getStatusMeta(conversation.status).tone}>{statusLabels[conversation.status] ?? conversation.status}</StatusBadge>
+              {conversation.operatorId ? (
+                <span className="queue-assignee" title={`Ответственный: ${assigneeName}`}>
+                  <OperatorAvatar avatar={assignee?.avatar} decorative name={assigneeName} size={18} />
+                  {assigneeName}
+                </span>
+              ) : null}
               <span className="queue-preview">{conversation.preview}</span>
               <span className={`queue-meta ${conversation.slaTone}`}>
                 {conversation.slaTone === "danger" ? <AlertTriangle size={15} /> : null}

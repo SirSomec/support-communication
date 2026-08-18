@@ -4,6 +4,7 @@ import { writeStructuredLog } from "@support-communication/observability";
 import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenant, type IdentityTenantUser } from "./identity.repository.js";
+import { operatorAvatarFromMetadata, resolveOperatorAvatarUrl } from "./operator-avatar.js";
 import { BillingRepository } from "../billing/billing.repository.js";
 import { BillingService } from "../billing/billing.service.js";
 import { TeamDirectoryRepository } from "./team-directory.repository.js";
@@ -880,7 +881,9 @@ export class SettingsEmployeeService {
   private toEmployee(user: IdentityTenantUser): Record<string, unknown> {
     const settings = this.getEmployeeSettings(user);
     const group = this.getGroup(user.tenantId, settings.groupId);
+    const avatar = operatorAvatarUrlFromMetadata(user.metadata);
     return {
+      ...(avatar ? { avatar } : {}),
       id: user.id,
       tenantId: user.tenantId,
       name: user.name,
@@ -1082,6 +1085,11 @@ const defaultGroups: Array<Omit<EmployeeGroup, "tenantId">> = [
 
 function groupKey(tenantId: string, groupId: string): string {
   return `${tenantId}:${groupId}`;
+}
+
+function operatorAvatarUrlFromMetadata(metadata: unknown): string | undefined {
+  const avatar = operatorAvatarFromMetadata(metadata);
+  return avatar ? resolveOperatorAvatarUrl(avatar) : undefined;
 }
 
 function employeeSettingsFromMetadata(metadata: Record<string, unknown> | undefined): EmployeeSettingsOverlay | null {

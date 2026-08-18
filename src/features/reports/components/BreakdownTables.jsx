@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ArrowDownUp, Headphones, Layers3 } from "lucide-react";
 import { mergeReportOperatorRows } from "../model/reportBreakdownModel.js";
 import { formatCompactNumber, formatDurationSeconds, formatNumber } from "../model/reportMetricRegistry.js";
+import { OperatorAvatar } from "../../operators/OperatorAvatar.jsx";
 
 const MIX_VIEWS = [
   { key: "channels", label: "Каналы" },
@@ -64,7 +65,13 @@ export function BreakdownTables({ breakdowns, operatorId, routing }) {
               return (
                 <tr data-identity-status={row.identityStatus} data-operator-id={row.id} key={row.id}>
                   <th scope="row">
-                    <span className="reports-avatar" aria-hidden="true">{row.identityStatus === "unattributed" ? "?" : initials(row.label)}</span>
+                    <OperatorAvatar
+                      avatar={row.identityStatus === "unattributed" ? "" : row.avatar}
+                      className="reports-avatar"
+                      decorative
+                      name={row.identityStatus === "unattributed" ? "?" : row.label}
+                      size={25}
+                    />
                     <span className="reports-operator-identity">
                       <span aria-describedby={identityNoteId}>{row.label}</span>
                       {row.identityDescription ? <small id={identityNoteId}>{row.identityDescription}</small> : null}
@@ -97,11 +104,6 @@ function rankedRows(values) {
   })).sort((a, b) => b.incoming - a.incoming || a.label.localeCompare(b.label, "ru"));
   const maximum = Math.max(1, ...rows.map((row) => row.incoming));
   return rows.map((row) => ({ ...row, relative: row.incoming / maximum * 100 }));
-}
-
-function initials(value) {
-  const parts = String(value).trim().split(/\s+/).filter(Boolean);
-  return (parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "");
 }
 
 function number(value) {

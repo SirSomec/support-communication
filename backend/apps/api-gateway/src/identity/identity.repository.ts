@@ -8,6 +8,7 @@ import {
   identityServiceAdminTariffCatalog,
   serviceAdminPrivilegedActions
 } from "./runtime-catalog.js";
+import { withDefaultOperatorAvatarMetadata } from "./operator-avatar.js";
 import type {
   IdentityAvailableOrganization,
   IdentityPermissionRole,
@@ -775,7 +776,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
   }
 
   saveTenantUser(user: IdentityTenantUser): MaybePromise<IdentityTenantUser> {
-    return this.adapter.saveTenantUser(user);
+    return this.adapter.saveTenantUser({
+      ...user,
+      metadata: withDefaultOperatorAvatarMetadata(user.metadata)
+    });
   }
 
   findTenantAuditEvents(tenantId: string): MaybePromise<IdentityTenantAuditEvent[]> {

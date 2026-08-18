@@ -198,6 +198,8 @@ export interface SupportOperationsBreakdownItem {
 export interface SupportOperationsOperatorWorkload {
   agentTouches: number;
   assignedBacklog: number;
+  /** Optional profile image resolved from the active tenant directory. */
+  avatar?: string;
   firstResponseMedianSeconds: number | null;
   identityStatus: "id_only" | "resolved" | "unattributed";
   internalComments: number;

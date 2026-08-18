@@ -40,6 +40,17 @@ export class AuthController {
     return this.authService.getTenantOperatorState({ sessionId: request.tenantOperatorContext?.sessionId });
   }
 
+  @Post("tenant/avatar")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(TenantOperatorAuthGuard)
+  @ApiOkResponse({ description: "Tenant operator avatar update envelope" })
+  tenantAvatar(@Body() payload: { avatar?: unknown }, @Req() request: TenantOperatorRequest) {
+    return this.authService.updateTenantOperatorAvatar(payload, {
+      tenantId: request.tenantOperatorContext?.tenantId,
+      userId: request.tenantOperatorContext?.userId
+    });
+  }
+
   @Post("tenant/logout")
   @HttpCode(HttpStatus.OK)
   @UseGuards(TenantOperatorAuthGuard)

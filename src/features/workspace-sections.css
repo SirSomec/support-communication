@@ -83,7 +83,7 @@
 
 .operator-row {
   display: grid;
-  grid-template-columns: 12px minmax(78px, 1fr) minmax(66px, 0.75fr) minmax(58px, auto) minmax(88px, 1fr) minmax(48px, auto) minmax(48px, auto) minmax(58px, auto) minmax(0, 1.1fr);
+  grid-template-columns: 12px minmax(128px, 1fr) minmax(66px, 0.75fr) minmax(58px, auto) minmax(88px, 1fr) minmax(48px, auto) minmax(48px, auto) minmax(58px, auto) minmax(0, 1.1fr);
   gap: 8px;
   align-items: center;
   min-height: 58px;
@@ -107,6 +107,22 @@
 
 .operator-row b {
   color: var(--text-secondary);
+}
+
+.operator-name-cell,
+.operator-name-with-avatar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.operator-name-cell .operator-name,
+.operator-name-with-avatar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .operator-presence {
@@ -171,6 +187,10 @@
 .presence-summary-row span {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.presence-summary-row .operator-name-with-avatar {
+  color: var(--text-secondary);
 }
 
 .presence-summary-head span {

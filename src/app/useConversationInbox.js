@@ -23,6 +23,7 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent, o
   const detailDebounceRef = useRef(new Map());
   const detailRefreshRequestedRef = useRef(new Set());
   const inboxRequestRef = useRef(0);
+  const assigneeRequestRef = useRef(0);
   const processedRealtimeEventIdsRef = useRef(new Set());
   const onPresenceEventRef = useRef(onPresenceEvent);
   const onRealtimeEventRef = useRef(onRealtimeEvent);
@@ -89,29 +90,32 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent, o
     void refreshInbox();
   }, [refreshInbox, sessionActive]);
 
-  useEffect(() => {
+  const refreshAssignees = useCallback(async () => {
+    const requestId = ++assigneeRequestRef.current;
     if (!sessionActive) {
       setAssignees([]);
-      return;
+      return { ok: false };
     }
 
-    let ignore = false;
-    void dialogService.fetchAssignees().then((response) => {
-      if (ignore) return;
-      const items = response.status === "ok" && Array.isArray(response.data?.items)
-        ? response.data.items
-        : [];
-      setAssignees(items.map((item) => ({
-        id: String(item?.id ?? ""),
-        name: String(item?.name ?? ""),
-        role: String(item?.role ?? "")
-      })).filter((item) => item.id && item.name));
-    });
-
-    return () => {
-      ignore = true;
-    };
+    const response = await dialogService.fetchAssignees();
+    const items = response.status === "ok" && Array.isArray(response.data?.items)
+      ? response.data.items
+      : [];
+    if (requestId !== assigneeRequestRef.current) {
+      return { ok: false, stale: true, response };
+    }
+    setAssignees(items.map((item) => ({
+      avatar: typeof item?.avatar === "string" ? item.avatar : "",
+      id: String(item?.id ?? ""),
+      name: String(item?.name ?? ""),
+      role: String(item?.role ?? "")
+    })).filter((item) => item.id && item.name));
+    return { ok: response.status === "ok", response };
   }, [sessionActive]);
+
+  useEffect(() => {
+    void refreshAssignees();
+  }, [refreshAssignees]);
 
   const appendMessage = useCallback(async (conversationId, message, options = {}) => {
     const optimistic = options.optimistic ?? true;
@@ -510,6 +514,7 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent, o
     loadInboxPage,
     loading,
     pagination,
+    refreshAssignees,
     refreshInbox,
     refreshing,
     setClosedIds,
@@ -530,6 +535,7 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent, o
     loadInboxPage,
     loading,
     pagination,
+    refreshAssignees,
     refreshInbox,
     refreshing,
     topics

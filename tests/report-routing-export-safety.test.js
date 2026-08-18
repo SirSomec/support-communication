@@ -94,7 +94,8 @@ describe("current-query routing breakdown consistency", () => {
     assert.equal(placeholder.label, "Без атрибуции");
     assert.match(placeholder.identityDescription, /Источник не подтвердил личность/);
     assert.equal(backendUnattributed.label, "Без атрибуции");
-    assert.match(breakdownSource, /row\.identityStatus === "unattributed" \? "\?" : initials\(row\.label\)/);
+    assert.match(breakdownSource, /avatar=\{row\.identityStatus === "unattributed" \? "" : row\.avatar\}/);
+    assert.match(breakdownSource, /name=\{row\.identityStatus === "unattributed" \? "\?" : row\.label\}/);
     assert.match(breakdownSource, /aria-describedby=\{identityNoteId\}/);
     assert.match(breakdownSource, /data-identity-status=\{row\.identityStatus\}/);
   });

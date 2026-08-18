@@ -27,7 +27,9 @@ import {
 import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
+import { AvatarPickerModal } from "./features/operators/AvatarPickerModal.jsx";
 import { SectionRouter } from "./features/section-router.jsx";
+import { authService } from "./services/authService.js";
 import { permissionService } from "./services/permissionService.js";
 import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
@@ -46,6 +48,7 @@ function App() {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [marketingNavigationGranted, setMarketingNavigationGranted] = useState(false);
   const [impersonation, setImpersonation] = useState(() => getImpersonationSession());
   const realtimeAttentionHandlerRef = useRef(null);
@@ -92,6 +95,7 @@ function App() {
     loadInboxPage,
     loading: inboxLoading,
     pagination: inboxPagination,
+    refreshAssignees,
     refreshInbox,
     setClosedIds,
     setConversationItems,
@@ -106,6 +110,21 @@ function App() {
     conversations: conversationItems,
     operatorId: tenantSession.operator?.id ?? ""
   });
+  const handleOperatorAvatarSave = useCallback(async (avatar) => {
+    const response = await authService.updateTenantOperatorAvatar({ avatar });
+    if (response.status !== "ok") {
+      return { message: response.error?.message ?? "Не удалось сохранить аватар.", ok: false };
+    }
+
+    const refreshed = await tenantSession.refresh({ force: true });
+    if (refreshed?.status !== "ok" || !refreshed.data?.authenticated) {
+      return { message: "Аватар сохранён, но профиль не удалось обновить. Перезагрузите страницу.", ok: false };
+    }
+
+    await refreshAssignees();
+    setToast("Аватар обновлён");
+    return { ok: true };
+  }, [refreshAssignees, setToast, tenantSession.refresh]);
   useEffect(() => {
     if (!tenantSession.authenticated) {
       setMarketingNavigationGranted(false);
@@ -540,7 +559,17 @@ function App() {
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "app-shell-sidebar-collapsed" : ""}`} data-testid="route-app-shell">
-      <Sidebar active={section} access={access} collapsed={sidebarCollapsed} onSelect={handleSectionSelect} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} operator={tenantSession.operator} presenceStatus={operatorPresence.presence?.status ?? ""} />
+      <Sidebar
+        active={section}
+        access={access}
+        avatarActionDisabled={Boolean(impersonation)}
+        collapsed={sidebarCollapsed}
+        onAvatarClick={() => setAvatarPickerOpen(true)}
+        onSelect={handleSectionSelect}
+        onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
+        operator={tenantSession.operator}
+        presenceStatus={operatorPresence.presence?.status ?? ""}
+      />
       <main className="workspace">
         {impersonation ? (
           <section className="impersonation-workspace-banner" aria-live="polite">
@@ -722,6 +751,13 @@ function App() {
           onCancel={handleStayOnConversation}
           onConfirm={handleDiscardDraftAndSwitch}
           targetConversation={pendingConversation}
+        />
+      ) : null}
+      {avatarPickerOpen ? (
+        <AvatarPickerModal
+          onClose={() => setAvatarPickerOpen(false)}
+          onSave={handleOperatorAvatarSave}
+          operator={tenantSession.operator}
         />
       ) : null}
       {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}

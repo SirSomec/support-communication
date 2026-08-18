@@ -7,6 +7,7 @@ import {
   hashPasswordCredential,
   PASSWORD_CREDENTIAL_ALGORITHM
 } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { withDefaultOperatorAvatarMetadata } from "../apps/api-gateway/src/identity/operator-avatar.ts";
 
 export interface IdentitySeedResult {
   billingTenantStates: number;
@@ -517,7 +518,7 @@ function toTenantUserSeedInput(user: (typeof tenantUsers)[number]): PrismaTenant
     id: user.id,
     inviteStatus: user.inviteStatus,
     lastActiveAt: user.lastActiveAt ? new Date(user.lastActiveAt) : null,
-    metadata: {},
+    metadata: withDefaultOperatorAvatarMetadata({}),
     mfa: user.mfa,
     name: user.name,
     risk: user.risk,

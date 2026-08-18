@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Check, Info, MoreHorizontal, UserRoundCheck, X } from "lucide-react";
 import { maskPhone, resolutionOutcomeLabels, statusLabels } from "../../app/dialogModel.js";
 import { Avatar } from "./Avatar.jsx";
+import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 import { DialogActionMenu } from "./DialogActionMenu.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { TopicCombobox } from "./TopicCombobox.jsx";
@@ -31,6 +32,8 @@ export function ChatHeader({
   const [targetOperatorId, setTargetOperatorId] = useState("");
   const visiblePhone = access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone);
   const availableTargets = assignees.filter((assignee) => assignee.id !== conversation.operatorId);
+  const assignedOperator = assignees.find((assignee) => assignee.id === conversation.operatorId);
+  const assignedOperatorName = assignedOperator?.name || conversation.operatorName || "Не назначен";
 
   useEffect(() => {
     setAssignmentPanelOpen(false);
@@ -82,9 +85,10 @@ export function ChatHeader({
           <span>{visiblePhone}</span>
           <small
             className="assignment-owner"
-            title={`Ответственный: ${conversation.operatorName || "не назначен"}`}
+            title={`Ответственный: ${assignedOperatorName}`}
           >
-            {conversation.operatorName || "Не назначен"}
+            {conversation.operatorId ? <OperatorAvatar avatar={assignedOperator?.avatar} decorative name={assignedOperatorName} size={18} /> : null}
+            <span>{assignedOperatorName}</span>
           </small>
         </div>
       </div>

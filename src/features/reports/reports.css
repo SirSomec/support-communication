@@ -1318,6 +1318,14 @@
   text-transform: uppercase;
 }
 
+.reports-avatar.operator-avatar {
+  width: 25px;
+  height: 25px;
+  flex-basis: 25px;
+  border-radius: 50%;
+  font-size: 8.5px;
+}
+
 .reports-inline-warning {
   margin: 0;
   padding: 9px 13px;

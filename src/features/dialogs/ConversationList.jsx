@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, Search, SlidersHorizontal } from "lucide-react";
+import { formatConversationActivityTime } from "../../app/conversationActivityTime.js";
 import {
   getConversationQualityAssessment,
   getStatusMeta,
@@ -12,6 +13,8 @@ import { StatusBadge } from "../../ui.jsx";
 import { OperatorAvatar } from "../operators/OperatorAvatar.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { Avatar } from "./Avatar.jsx";
+
+const ACTIVITY_TIME_TICK_MS = 1000;
 
 export function ConversationList({
   assignees = [],
@@ -35,6 +38,11 @@ export function ConversationList({
   closedIds
 }) {
   const [isFilterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [timeNow, setTimeNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setTimeNow(new Date()), ACTIVITY_TIME_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
   const channelOptions = useMemo(
     () => Array.from(new Set(allConversations.flatMap((conversation) => conversation.channels ?? [conversation.channel]))),
     [allConversations]
@@ -174,7 +182,7 @@ export function ConversationList({
               <span className="queue-title">
                 <strong>{conversation.name}</strong>
                 <RepeatAppealBadge compact conversation={conversation} />
-                <time>{conversation.time}</time>
+                <time>{formatConversationActivityTime(conversation, { now: timeNow })}</time>
               </span>
               <span className="queue-chip-row">
                 {(conversation.channels ?? [conversation.channel]).map((channel) => (

@@ -657,6 +657,83 @@ test("conversation queue filters remain actionable", async ({ page }) => {
   await expectHealthyPage(page);
 });
 
+test("conversation queue derives activity time and order from timestamps", async ({ page }) => {
+  const now = Date.now();
+  const items = [
+    {
+      id: "time-fresh",
+      name: "Свежее обращение",
+      channel: "SDK",
+      phone: "+7 900 000-00-01",
+      status: "active",
+      time: "now",
+      updatedAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      messages: [{ id: "time-fresh-message", side: "client", text: "Только что", time: "now", createdAt: new Date(now - 10_000).toISOString() }]
+    },
+    {
+      id: "time-recent",
+      name: "Недавнее обращение",
+      channel: "Telegram",
+      phone: "+7 900 000-00-02",
+      status: "active",
+      time: "now",
+      updatedAt: new Date(now - 3 * 60 * 1000).toISOString(),
+      messages: []
+    },
+    {
+      id: "time-old",
+      name: "Старое обращение",
+      channel: "VK",
+      phone: "+7 900 000-00-03",
+      status: "closed",
+      time: "now",
+      updatedAt: new Date(now - 26 * 60 * 60 * 1000).toISOString(),
+      messages: []
+    }
+  ];
+
+  await page.route("**/api/v1/dialogs?*", async (route) => {
+    if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/v1/dialogs") {
+      return route.continue();
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        data: { items, pagination: { mode: "backend-ready", page: 1, pageSize: 25, total: items.length } }
+      })
+    });
+  });
+  await page.route("**/api/v1/dialogs/time-*", async (route) => {
+    const item = items.find((candidate) => route.request().url().endsWith(`/dialogs/${candidate.id}`));
+    if (!item || route.request().method() !== "GET") {
+      return route.continue();
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok", data: { conversation: item, lifecycleEvents: [] } })
+    });
+  });
+
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+
+  const queueRows = page.locator(".queue-row");
+  await expect(queueRows).toHaveCount(3);
+  await expect(queueRows.nth(0)).toContainText("Свежее обращение");
+  await expect(queueRows.nth(1)).toContainText("Недавнее обращение");
+  await expect(queueRows.nth(2)).toContainText("Старое обращение");
+
+  const activityTimes = await queueRows.locator(".queue-title time").allTextContents();
+  expect(activityTimes[0]).toBe("Сейчас");
+  expect(activityTimes[1]).toMatch(/^\d{2}:\d{2}$/);
+  expect(activityTimes[2]).toMatch(/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/);
+
+  await queueRows.nth(1).click();
+  await expect(page.locator(".chat-header")).toContainText("Недавнее обращение");
+  await expectHealthyPage(page);
+});
+
 test("customer panel inserts templates and enforces close topic", async ({ page }) => {
   await seedTenantTemplate(page, {
     channel: "Telegram",

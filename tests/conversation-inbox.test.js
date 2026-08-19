@@ -15,6 +15,10 @@ import {
   maskPhone,
   matchesQueueTab
 } from "../src/app/dialogModel.js";
+import {
+  formatConversationActivityTime,
+  getConversationActivityTimeValue
+} from "../src/app/conversationActivityTime.js";
 
 describe("sensitive dialog fields", () => {
   it("masks phone numbers fail-closed regardless of their input format", () => {
@@ -241,6 +245,54 @@ describe("conversationApiMapper", () => {
       "Оценка качества изменена",
       "Бот закрыл обращение: клиент подтвердил решение"
     ]);
+  });
+});
+
+describe("conversation list activity time", () => {
+  it("uses the latest message timestamp instead of the legacy now placeholder", () => {
+    const conversation = mapApiConversation({
+      id: "conv-activity-message",
+      time: "now",
+      updatedAt: "2026-07-02T11:50:00.000",
+      messages: [
+        { id: "old", side: "client", text: "Earlier", createdAt: "2026-07-02T11:59:00.000", time: "now" },
+        { id: "latest", side: "agent", text: "Latest", createdAt: "2026-07-02T12:03:30.000", time: "now" }
+      ]
+    });
+    const now = new Date("2026-07-02T12:04:00.000");
+
+    assert.equal(getConversationActivityTimeValue(conversation), Date.parse("2026-07-02T12:03:30.000"));
+    assert.equal(formatConversationActivityTime(conversation, { now }), "Сейчас");
+  });
+
+  it("uses updatedAt when the list response has no message timestamps", () => {
+    const conversation = mapApiConversation({
+      id: "conv-activity-updated",
+      time: "now",
+      updatedAt: "2026-07-02T12:00:00.000",
+      messages: []
+    });
+
+    assert.equal(
+      formatConversationActivityTime(conversation, { now: new Date("2026-07-02T12:04:00.000") }),
+      "12:00"
+    );
+  });
+
+  it("uses the most recent appeal in a client thread and preserves a legacy fallback", () => {
+    const thread = {
+      time: "09:30",
+      appeals: [
+        { id: "primary", updatedAt: "2026-07-01T09:30:00.000", messages: [] },
+        { id: "latest", time: "now", messages: [{ createdAt: "2026-07-02T10:15:00.000" }] }
+      ]
+    };
+
+    assert.equal(
+      formatConversationActivityTime(thread, { now: new Date("2026-07-02T12:00:00.000") }),
+      "10:15"
+    );
+    assert.equal(formatConversationActivityTime({ time: "16:56" }), "16:56");
   });
 });
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { getConversationActivityTimeValue } from "./conversationActivityTime.js";
 import {
   getConversationTimeValue,
   matchesQueueTab,
@@ -55,6 +56,17 @@ export function useDialogQueueFilters({ conversationItems, topics, operatorId = 
           return left.channel.localeCompare(right.channel, "ru");
         }
 
+        const rightActivity = getConversationActivityTimeValue(right);
+        const leftActivity = getConversationActivityTimeValue(left);
+        if (Number.isFinite(rightActivity) && Number.isFinite(leftActivity)) {
+          return rightActivity - leftActivity;
+        }
+        if (Number.isFinite(rightActivity)) {
+          return -1;
+        }
+        if (Number.isFinite(leftActivity)) {
+          return 1;
+        }
         return getConversationTimeValue(right.time) - getConversationTimeValue(left.time);
       });
   }, [conversationItems, filter, operatorId, query, queueFilters, topics]);

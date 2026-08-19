@@ -16,6 +16,7 @@ model Tenant {
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   auditEvents TenantAuditEvent[]
+  currentShift CurrentShift?
   users       TenantUser[]
   supportTickets SupportTicket[]
 
@@ -3200,6 +3201,20 @@ model OperatorPresenceInterval {
   @@index([tenantId, endedAt], map: "operator_presence_tenant_open_idx")
   @@index([tenantId, startedAt], map: "operator_presence_tenant_started_idx")
   @@map("operator_presence_intervals")
+}
+
+model CurrentShift {
+  tenantId    String   @id @map("tenant_id")
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  startsAt    DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt      DateTime @map("ends_at") @db.Timestamptz(3)
+  operatorIds String[] @default([]) @map("operator_ids")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([startsAt, endsAt], map: "current_shifts_time_range_idx")
+  @@map("current_shifts")
 }
 
 model AiSuggestionDecision {

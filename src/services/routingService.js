@@ -29,10 +29,11 @@ export const routingService = {
     });
   },
 
-  async fetchWorkload(filters = {}) {
+  async fetchWorkload(filters = {}, options = {}) {
     return apiRequest("/routing/workload", {
       operation: "fetchWorkload",
       query: filters,
+      signal: options.signal,
       service: SERVICE
     });
   },

@@ -342,15 +342,17 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       const operators = envelope.data.operators as Array<Record<string, unknown>>;
       assert.deepEqual(operators.map((operator) => operator.operatorId), ["operator-anna", "operator-ivan"]);
 
-      const anna = operators[0] as { avatar?: string; seconds: Record<string, number>; since: string; status: string; trackedSeconds: number };
+      const anna = operators[0] as { avatar?: string; lineStartedAt: string; seconds: Record<string, number>; since: string; status: string; trackedSeconds: number };
       assert.equal(anna.avatar, "/avatars/operator-12.png");
       assert.equal(anna.status, "break");
+      assert.equal(anna.lineStartedAt, "2026-07-13T08:00:00.000Z");
       assert.equal(anna.seconds.online, 600);
       assert.equal(anna.seconds.break, 300);
       assert.equal(anna.trackedSeconds, 900);
       assert.equal(anna.since, "2026-07-13T08:10:00.000Z");
 
-      const ivan = operators[1] as { status: string | null; trackedSeconds: number };
+      const ivan = operators[1] as { lineStartedAt: string | null; status: string | null; trackedSeconds: number };
+      assert.equal(ivan.lineStartedAt, null);
       assert.equal(ivan.status, null);
       assert.equal(ivan.trackedSeconds, 0);
 

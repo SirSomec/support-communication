@@ -3,6 +3,7 @@ import { WorkspaceAuditModule } from "./audit/workspace-audit.module.js";
 import { AutomationModule } from "./automation/automation.module.js";
 import { BillingModule } from "./billing/billing.module.js";
 import { ConversationModule } from "./conversation/conversation.module.js";
+import { CurrentShiftModule } from "./shifts/current-shift.module.js";
 import { FeatureFlagModule } from "./feature-flags/feature-flag.module.js";
 import { HealthController } from "./health.controller.js";
 import { MetricsController } from "./metrics.controller.js";
@@ -32,6 +33,7 @@ import { MarketingModule } from "./marketing/marketing.module.js";
     AutomationModule,
     BillingModule,
     ConversationModule,
+    CurrentShiftModule,
     FeatureFlagModule,
     IdentityModule,
     IncidentModule,

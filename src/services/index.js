@@ -16,6 +16,7 @@ export { operationsService } from "./operationsService.js";
 export { permissionService } from "./permissionService.js";
 export { presenceService } from "./presenceService.js";
 export { routingService } from "./routingService.js";
+export { shiftService } from "./shiftService.js";
 export { platformMonitoringService } from "./platformMonitoringService.js";
 export { publicLeadService } from "./publicLeadService.js";
 export { qualityService } from "./qualityService.js";

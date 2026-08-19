@@ -210,6 +210,7 @@ export class OperatorPresenceService {
     const activeUsers = users.filter((user) => user.tenantId === tenantId && user.status === "active");
     const currentByOperator = new Map(currentRecords.map((record) => [record.operatorId, record]));
     const secondsByOperator = summarizeIntervalSeconds(intervals, range.value);
+    const lineStartedAtByOperator = firstOnlineStartedAt(intervals);
 
     const operators = activeUsers.map((user) => {
       const current = currentByOperator.get(user.id) ?? null;
@@ -221,6 +222,7 @@ export class OperatorPresenceService {
         operatorId: user.id,
         role: user.role,
         seconds,
+        lineStartedAt: lineStartedAtByOperator.get(user.id) ?? null,
         since: current?.since ?? null,
         status: current?.status ?? null,
         trackedSeconds: Object.values(seconds).reduce((sum, value) => sum + value, 0)
@@ -353,6 +355,26 @@ function summarizeIntervalSeconds(
     summary.set(interval.operatorId, operatorSummary);
   }
   return summary;
+}
+
+/**
+ * The start of the first "online" interval overlapping the selected range is
+ * the only reliable answer to "when did this operator come on the line?".
+ * `since` describes the current status and is reset when an operator takes a
+ * break, so it must not be reused for this field.
+ */
+function firstOnlineStartedAt(
+  intervals: Array<{ operatorId: string; startedAt: string; status: OperatorPresenceStatus }>
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const interval of intervals) {
+    if (interval.status !== "online") continue;
+    const current = result.get(interval.operatorId);
+    if (!current || interval.startedAt < current) {
+      result.set(interval.operatorId, interval.startedAt);
+    }
+  }
+  return result;
 }
 
 function errorEnvelope(

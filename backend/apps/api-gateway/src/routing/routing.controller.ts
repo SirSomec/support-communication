@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
-import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { ApiBadRequestResponse, ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
-import { type RoutingRequestContext, RoutingService } from "./routing.service.js";
+import { type RoutingRequestContext, RoutingService, validateWorkloadFilters } from "./routing.service.js";
 
 @ApiTags("routing")
 @UseGuards(TenantOperatorOrServiceAdminGuard)
@@ -15,7 +15,22 @@ export class RoutingController {
   @RequireTenantOperatorPermission("routing.read")
   @RequireServiceAdminAction("routing.read")
   @ApiOkResponse({ description: "Operator workload and queue health envelope" })
-  fetchWorkload(@Query() query: { channel?: string }, @Req() request: TenantOperatorRequest) {
+  @ApiBadRequestResponse({ description: "Unsupported workload period or timezone offset" })
+  fetchWorkload(@Query() query: {
+    channel?: string;
+    period?: string;
+    timezoneOffsetMinutes?: string;
+  }, @Req() request: TenantOperatorRequest) {
+    const validationError = validateWorkloadFilters(query);
+    if (validationError) {
+      // Service callers receive the same machine-readable validation code in
+      // an envelope; HTTP callers additionally get the expected 400 status.
+      throw new BadRequestException({
+        code: validationError.code,
+        ...validationError.data,
+        message: validationError.message
+      });
+    }
     return this.routingService.fetchWorkload(query, routingContextFromRequest(request));
   }
 

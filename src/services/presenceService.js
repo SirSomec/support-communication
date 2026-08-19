@@ -28,10 +28,11 @@ export const presenceService = {
     });
   },
 
-  async fetchTeamPresence(filters = {}) {
+  async fetchTeamPresence(filters = {}, options = {}) {
     return apiRequest("/presence/team", {
       operation: "fetchTeamPresence",
       query: filters,
+      signal: options.signal,
       service: SERVICE
     });
   },

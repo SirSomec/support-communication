@@ -10,6 +10,8 @@ import { configureAutomationRepository } from "./automation/bootstrap.js";
 import { configureBillingRepository } from "./billing/bootstrap.js";
 import { configureConversationRealtimeFanout, configureConversationRepository } from "./conversation/bootstrap.js";
 import { ConversationService } from "./conversation/conversation.service.js";
+import { configureCurrentShiftRepository } from "./shifts/bootstrap.js";
+import { CurrentShiftService } from "./shifts/current-shift.service.js";
 import { startRealtimeRetentionWorker } from "./conversation/realtime-retention.worker.js";
 import { installRealtimeWebSocketReplay } from "./conversation/realtime.websocket.js";
 import { EnvelopeHttpExceptionFilter } from "./http-exception.filter.js";
@@ -48,6 +50,8 @@ export async function bootstrap(): Promise<void> {
   configureBillingRepository(config, { seed: localSeeds.billing });
   const conversationRepository = configureConversationRepository(config, { seed: localSeeds.conversation });
   configureConversationRealtimeFanout(config);
+  configureCurrentShiftRepository(config);
+  CurrentShiftService.configureRealtimeFanoutFromEnv(process.env);
   configureWorkspaceRepository(config, { seed: localSeeds.workspace });
   const routingRepository = configureRoutingRepository(config, { seed: localSeeds.routing });
   await routingRepository.hydrateStateSnapshot();

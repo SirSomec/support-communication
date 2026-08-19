@@ -27,8 +27,37 @@ const supportedRescueOutcomes = new Set(["missed", "returned_to_queue", "saved"]
 type AssignmentAction = "assign" | "return_queue" | "transfer";
 type RescueOutcome = "missed" | "returned_to_queue" | "saved";
 
-interface WorkloadFilters {
+export type WorkloadPeriodMode = "live" | "hour" | "today" | "7days" | "30days";
+
+export interface WorkloadFilters {
   channel?: string;
+  period?: string;
+  timezoneOffsetMinutes?: number | string;
+}
+
+export interface WorkloadFilterValidationError {
+  code: "workload_period_invalid" | "workload_timezone_offset_invalid";
+  data: Record<string, unknown>;
+  message: string;
+}
+
+interface WorkloadPeriodMetadata {
+  /**
+   * `not_available_for_live_snapshot` makes the all-zero operator activity
+   * explicit: live mode is deliberately a current-state read, not a
+   * historical analytics window.
+   */
+  activitySource: "not_available_for_live_snapshot" | "routing_analytics_window";
+  from: string | null;
+  label: string;
+  mode: WorkloadPeriodMode;
+  to: string | null;
+}
+
+interface OperatorWorkloadActivity {
+  assignmentCount: number;
+  total: number;
+  transferCount: number;
 }
 
 interface AssignmentPayload {
@@ -132,7 +161,23 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("fetchWorkload");
     }
 
+    const filterValidationError = validateWorkloadFilters(filters);
+    if (filterValidationError) {
+      return invalidEnvelope(
+        "fetchWorkload",
+        filterValidationError.code,
+        filterValidationError.message,
+        filterValidationError.data
+      );
+    }
+
     const channel = normalizeChannel(filters.channel);
+    const snapshotAt = new Date();
+    const workloadPeriod = resolveWorkloadPeriod(
+      normalizeWorkloadPeriod(filters.period)!,
+      normalizeWorkloadTimezoneOffset(filters.timezoneOffsetMinutes),
+      snapshotAt
+    );
     const canonical = this.canonicalWorkload ? await this.canonicalWorkload.readWorkload(tenantId) : null;
     const queues = canonical
       ? canonical.queues.filter((queue) => !channel || queue.queueId === channel || queue.transportChannels.includes(channel))
@@ -152,6 +197,7 @@ export class RoutingService {
         .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
         .filter((operator) => this.operatorCanAccessChannel(operator, channel, memberships)))
       .map((operator) => withOperatorPresence(operator, presenceByOperator.get(operator.id)));
+    const activityByOperator = operatorWorkloadActivityByOperator(routingAnalyticsRows, workloadPeriod, channel);
     const operators = operatorSource
       .map((operator) => operatorProjection(
         operator,
@@ -160,7 +206,11 @@ export class RoutingService {
         canonical
           ? Array.from(canonicalQueueIdsByOperator?.get(operator.id) ?? []).some((queueId) => visibleQueueIds.has(queueId))
           : hasMembershipChannelAccess(memberships, operator.id, channel)
-      ));
+      ))
+      .map((operator) => ({
+        ...operator,
+        activity: activityByOperator.get(String(operator.id)) ?? emptyOperatorWorkloadActivity()
+      }) as Record<string, unknown> & { activity: OperatorWorkloadActivity });
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -171,9 +221,10 @@ export class RoutingService {
       data: {
         operators,
         queues: queues.map(queueProjection),
-        refreshedAt: new Date().toISOString(),
+        refreshedAt: snapshotAt.toISOString(),
         routingAnalytics: routingAnalyticsProjection(routingAnalyticsRows, channel, tenantId),
         routingPolicy,
+        workloadPeriod,
         dataQuality: canonical ? {
           canonical: true,
           operatorPresence: presenceQualityLabel(operatorSource),
@@ -1873,6 +1924,171 @@ function queueProjection(queue: RoutingQueue): Record<string, unknown> {
       ? (queue as RoutingQueue & { name: string }).name
       : queue.channel
   };
+}
+
+/**
+ * Shared by the HTTP controller and the service so direct service consumers
+ * receive the same validation result as API callers.
+ */
+export function validateWorkloadFilters(filters: WorkloadFilters = {}): WorkloadFilterValidationError | null {
+  if (!normalizeWorkloadPeriod(filters.period)) {
+    return {
+      code: "workload_period_invalid",
+      message: "Workload period must be live, hour, today, 7days or 30days.",
+      data: {
+        period: filters.period ?? null,
+        supportedPeriods: ["live", "hour", "today", "7days", "30days"]
+      }
+    };
+  }
+
+  try {
+    normalizeWorkloadTimezoneOffset(filters.timezoneOffsetMinutes);
+  } catch {
+    return {
+      code: "workload_timezone_offset_invalid",
+      message: "timezoneOffsetMinutes must be an integer between -840 and 840.",
+      data: {
+        timezoneOffsetMinutes: filters.timezoneOffsetMinutes ?? null
+      }
+    };
+  }
+
+  return null;
+}
+
+function normalizeWorkloadPeriod(value: string | undefined): WorkloadPeriodMode | null {
+  const period = String(value ?? "live").trim().toLowerCase();
+  if (!period) {
+    return "live";
+  }
+  return period === "live" || period === "hour" || period === "today" || period === "7days" || period === "30days"
+    ? period
+    : null;
+}
+
+function normalizeWorkloadTimezoneOffset(value: number | string | undefined): number {
+  if (value === undefined || value === "") {
+    return 0;
+  }
+  if (typeof value !== "number" && typeof value !== "string") {
+    throw new RangeError("timezoneOffsetMinutes must be an integer between -840 and 840.");
+  }
+  const parsed = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || Math.abs(parsed) > 14 * 60) {
+    throw new RangeError("timezoneOffsetMinutes must be an integer between -840 and 840.");
+  }
+  return parsed;
+}
+
+function resolveWorkloadPeriod(
+  mode: WorkloadPeriodMode,
+  timezoneOffsetMinutes: number,
+  snapshotAt: Date
+): WorkloadPeriodMetadata {
+  if (mode === "live") {
+    return {
+      activitySource: "not_available_for_live_snapshot",
+      from: null,
+      label: "Текущая нагрузка",
+      mode,
+      to: null
+    };
+  }
+
+  const snapshotAtMs = snapshotAt.getTime();
+  const localDayStart = startOfOffsetDay(snapshotAtMs, timezoneOffsetMinutes);
+  const from = mode === "hour"
+    ? snapshotAtMs - 60 * 60 * 1000
+    : mode === "today"
+      ? localDayStart
+      : mode === "7days"
+        ? localDayStart - 6 * 24 * 60 * 60 * 1000
+        : localDayStart - 29 * 24 * 60 * 60 * 1000;
+  const label = mode === "hour"
+    ? "Последний час"
+    : mode === "today"
+      ? "Сегодня"
+      : mode === "7days"
+        ? "Последние 7 дней"
+        : "Последние 30 дней";
+
+  return {
+    activitySource: "routing_analytics_window",
+    from: new Date(from).toISOString(),
+    label,
+    mode,
+    to: snapshotAt.toISOString()
+  };
+}
+
+function startOfOffsetDay(timestamp: number, timezoneOffsetMinutes: number): number {
+  const shifted = new Date(timestamp + timezoneOffsetMinutes * 60 * 1000);
+  return Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate())
+    - timezoneOffsetMinutes * 60 * 1000;
+}
+
+function emptyOperatorWorkloadActivity(): OperatorWorkloadActivity {
+  return {
+    assignmentCount: 0,
+    total: 0,
+    transferCount: 0
+  };
+}
+
+function operatorWorkloadActivityByOperator(
+  rows: RoutingAnalyticsRow[],
+  workloadPeriod: WorkloadPeriodMetadata,
+  channel?: string
+): Map<string, OperatorWorkloadActivity> {
+  const byOperator = new Map<string, {
+    assignmentEventIds: Set<string>;
+    transferEventIds: Set<string>;
+  }>();
+  // `live` represents only the current state. Its all-zero values are
+  // intentionally marked by workloadPeriod.activitySource rather than
+  // claiming that no routing events have ever occurred.
+  if (workloadPeriod.from === null || workloadPeriod.to === null) {
+    return new Map();
+  }
+
+  const from = Date.parse(workloadPeriod.from);
+  const to = Date.parse(workloadPeriod.to);
+  const aggregate = (operatorId: string) => {
+    const existing = byOperator.get(operatorId);
+    if (existing) {
+      return existing;
+    }
+    const created = { assignmentEventIds: new Set<string>(), transferEventIds: new Set<string>() };
+    byOperator.set(operatorId, created);
+    return created;
+  };
+
+  for (const row of rows) {
+    const occurredAt = Date.parse(row.occurredAt);
+    if (!Number.isFinite(occurredAt) || occurredAt < from || occurredAt >= to || (channel && row.channel !== channel)) {
+      continue;
+    }
+    if (row.eventKind === "assignment" && row.toOperatorId) {
+      aggregate(row.toOperatorId).assignmentEventIds.add(row.id);
+      continue;
+    }
+    if (row.eventKind === "transfer") {
+      // A transfer is activity for both the sending and receiving operator;
+      // an id set prevents double-counting when both ids are the same.
+      for (const operatorId of new Set([row.fromOperatorId, row.toOperatorId])) {
+        if (operatorId) {
+          aggregate(operatorId).transferEventIds.add(row.id);
+        }
+      }
+    }
+  }
+
+  return new Map([...byOperator.entries()].map(([operatorId, events]) => {
+    const assignmentCount = events.assignmentEventIds.size;
+    const transferCount = events.transferEventIds.size;
+    return [operatorId, { assignmentCount, transferCount, total: assignmentCount + transferCount }];
+  }));
 }
 
 function routingAnalyticsProjection(rows: RoutingAnalyticsRow[], channel: string | undefined, tenantId: string): Record<string, unknown> {

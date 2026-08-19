@@ -104,6 +104,131 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(typeof workload.data.totals.overdueChats, "number");
   });
 
+  it("describes workload windows and attaches per-operator historical routing activity without changing live counters", async () => {
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+    const now = Date.now();
+    const timestamp = (millisecondsAgo: number) => new Date(now - millisecondsAgo).toISOString();
+    await repository.saveRoutingAnalyticsRow({
+      channel: "Telegram",
+      conversationId: "vladimir",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "workload_period_recent_assignment",
+      occurredAt: timestamp(15 * 60 * 1000),
+      source: "api",
+      tenantId: "tenant-volga",
+      toOperatorId: "operator-kirill"
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "Telegram",
+      conversationId: "vladimir",
+      eventKind: "transfer",
+      fromOperatorId: "operator-kirill",
+      id: "workload_period_recent_transfer",
+      occurredAt: timestamp(10 * 60 * 1000),
+      source: "api",
+      tenantId: "tenant-volga",
+      toOperatorId: "operator-ivan"
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "Telegram",
+      conversationId: "vladimir",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "workload_period_old_assignment",
+      occurredAt: timestamp(2 * 60 * 60 * 1000),
+      source: "api",
+      tenantId: "tenant-volga",
+      toOperatorId: "operator-kirill"
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "VK",
+      conversationId: "alexey",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "workload_period_other_channel",
+      occurredAt: timestamp(10 * 60 * 1000),
+      source: "api",
+      tenantId: "tenant-volga",
+      toOperatorId: "operator-anna"
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "Telegram",
+      conversationId: "foreign",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "workload_period_foreign_tenant",
+      occurredAt: timestamp(10 * 60 * 1000),
+      source: "api",
+      tenantId: "tenant-ladoga",
+      toOperatorId: "operator-kirill"
+    });
+    const routing = new RoutingService(repository);
+
+    const live = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
+    assert.deepEqual(live.data.workloadPeriod, {
+      activitySource: "not_available_for_live_snapshot",
+      from: null,
+      label: "Текущая нагрузка",
+      mode: "live",
+      to: null
+    });
+    const liveKirill = live.data.operators.find((operator) => operator.id === "operator-kirill");
+    assert.deepEqual(liveKirill.activity, { assignmentCount: 0, total: 0, transferCount: 0 });
+
+    const hour = await routing.fetchWorkload({ channel: "Telegram", period: "hour" }, VOLGA_CONTEXT);
+    const hourPeriod = hour.data.workloadPeriod as {
+      activitySource: string;
+      from: string;
+      label: string;
+      mode: string;
+      to: string;
+    };
+    assert.equal(hourPeriod.mode, "hour");
+    assert.equal(hourPeriod.label, "Последний час");
+    assert.equal(hourPeriod.activitySource, "routing_analytics_window");
+    assert.equal(Date.parse(hourPeriod.to) - Date.parse(hourPeriod.from), 60 * 60 * 1000);
+    assert.equal(hour.data.totals.activeChats, live.data.totals.activeChats, "activeChats stays a current snapshot");
+    const hourKirill = hour.data.operators.find((operator) => operator.id === "operator-kirill");
+    const hourIvan = hour.data.operators.find((operator) => operator.id === "operator-ivan");
+    assert.deepEqual(hourKirill.activity, { assignmentCount: 1, total: 2, transferCount: 1 });
+    assert.deepEqual(hourIvan.activity, { assignmentCount: 0, total: 1, transferCount: 1 });
+
+    const today = await routing.fetchWorkload({ period: "today", timezoneOffsetMinutes: "180" }, VOLGA_CONTEXT);
+    const todayPeriod = today.data.workloadPeriod as { from: string; mode: string; to: string };
+    const snapshot = new Date(Date.parse(todayPeriod.to) + 180 * 60 * 1000);
+    const expectedTodayStart = Date.UTC(snapshot.getUTCFullYear(), snapshot.getUTCMonth(), snapshot.getUTCDate()) - 180 * 60 * 1000;
+    assert.equal(todayPeriod.mode, "today");
+    assert.equal(Date.parse(todayPeriod.from), expectedTodayStart);
+
+    for (const period of ["7days", "30days"] as const) {
+      const workload = await routing.fetchWorkload({ period }, VOLGA_CONTEXT);
+      const workloadPeriod = workload.data.workloadPeriod as { from: string; mode: string; to: string };
+      const expectedDays = period === "7days" ? 6 : 29;
+      const snapshot = new Date(Date.parse(workloadPeriod.to));
+      const expectedFrom = Date.UTC(snapshot.getUTCFullYear(), snapshot.getUTCMonth(), snapshot.getUTCDate())
+        - expectedDays * 24 * 60 * 60 * 1000;
+      assert.equal(workloadPeriod.mode, period);
+      assert.equal(Date.parse(workloadPeriod.from), expectedFrom);
+    }
+  });
+
+  it("rejects unsupported workload periods and timezone offsets in both service and HTTP controller contracts", async () => {
+    const routing = new RoutingService();
+    const invalidPeriod = await routing.fetchWorkload({ period: "quarter" }, VOLGA_CONTEXT);
+    assert.equal(invalidPeriod.status, "invalid");
+    assert.equal(invalidPeriod.error?.code, "workload_period_invalid");
+
+    const invalidOffset = await routing.fetchWorkload({ timezoneOffsetMinutes: "841" }, VOLGA_CONTEXT);
+    assert.equal(invalidOffset.status, "invalid");
+    assert.equal(invalidOffset.error?.code, "workload_timezone_offset_invalid");
+
+    const controllerSource = readFileSync(new URL("../apps/api-gateway/src/routing/routing.controller.ts", import.meta.url), "utf8");
+    assert.match(controllerSource, /BadRequestException/);
+    assert.match(controllerSource, /throw new BadRequestException/);
+    assert.match(controllerSource, /timezoneOffsetMinutes\?: string/);
+  });
+
   it("keeps workload reads side-effect free in durable routing repositories", async () => {
     const repository = RoutingRepository.inMemory();
     const routing = new RoutingService(repository);

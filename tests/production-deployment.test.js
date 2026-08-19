@@ -71,6 +71,7 @@ describe("production deployment contract", () => {
     for (const name of ["notification-delivery-worker", "webhook-delivery-worker", "outbox-worker", "file-scan-scanner-worker"]) {
       assert.ok(config.services[name].command.includes("./scripts/worker-health-runtime.mjs"), `${name} must preload the common heartbeat runtime`);
     }
+    assert.equal(config.services["outbox-worker"].environment.OUTBOX_HTTP_TIMEOUT_MS, "15000");
   });
 
   it("builds non-root production runtime and dedicated migration targets", () => {

@@ -309,6 +309,10 @@ services:
       <<: *runtime-environment
       SERVICE_NAME: outbox-worker
       OUTBOX_QUEUE: message-delivery
+      # Telegram requests occasionally exceed the generic 5 s runtime default.
+      # Keep retries exceptional instead of turning a transient slow response
+      # into the worker's one-minute retry backoff.
+      OUTBOX_HTTP_TIMEOUT_MS: ${OUTBOX_HTTP_TIMEOUT_MS:-15000}
       OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
       OUTBOX_VK_ENABLED: ${OUTBOX_VK_ENABLED:-true}
       OUTBOX_VK_ENDPOINT: ${OUTBOX_VK_API_BASE_URL:-https://api.vk.com}

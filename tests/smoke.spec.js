@@ -659,6 +659,8 @@ test("conversation queue filters remain actionable", async ({ page }) => {
 
 test("conversation queue derives activity time and order from timestamps @release", async ({ page }) => {
   const now = Date.now();
+  await page.clock.install({ time: now });
+  await page.clock.setFixedTime(now);
   const items = [
     {
       id: "time-fresh",

@@ -1,0 +1,11 @@
+[Unit]
+Description=Select a healthy Telegram Xray outbound
+After=network-online.target xray-telegram.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/support-communication/app/deploy/scripts/telegram-xray-failover.sh
+RuntimeDirectory=support-communication-telegram-xray-failover
+NoNewPrivileges=true
+PrivateTmp=true

@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { createEnvelope } from "@support-communication/envelope";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
 import { createTelegramOutboundMessageDispatcher } from "../apps/api-gateway/src/integrations/telegram-outbound.dispatcher.ts";
 import { loadTelegramPollingRuntimeConfig } from "../apps/api-gateway/src/integrations/telegram-polling.main.ts";
-import { pollTelegramUpdatesOnce, startTelegramPollingWorker } from "../apps/api-gateway/src/integrations/telegram-polling.worker.ts";
+import { createTelegramPollingProviderHealthState, pollTelegramUpdatesOnce, startTelegramPollingWorker } from "../apps/api-gateway/src/integrations/telegram-polling.worker.ts";
 import { resolveOrCreateTelegramConversation, telegramConversationId } from "../apps/api-gateway/src/integrations/telegram-webhook.route.ts";
 
 describe("telegram polling ingress contracts", () => {
@@ -108,6 +107,9 @@ describe("telegram polling ingress contracts", () => {
 
     assert.equal(result.accepted, 1);
     assert.equal(result.polled, 1);
+    assert.equal(result.providerHealth.status, "healthy");
+    assert.equal(result.providerHealth.successfulConnections, 1);
+    assert.ok(result.providerHealth.lastSuccessfulPollAt);
     assert.ok(requestedUrls.some((url) => url.includes("/getUpdates")));
 
     const persistedConnection = await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-polling");
@@ -267,13 +269,99 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(connectionBackoff.get("tenant-failing:backoff-bot-0")?.attempts, 2);
   });
 
+  it("keeps persistent Telegram transport failure unhealthy while the connection is backing off", async () => {
+    const now = new Date("2026-07-16T12:00:00.000Z");
+    const integrationRepository = {
+      listTelegramConnections: () => [{
+        botId: "transport-bot",
+        botToken: "810000:transport_token",
+        botUsername: "transport_bot",
+        createdAt: now.toISOString(),
+        status: "active" as const,
+        tenantId: "tenant-transport-failure",
+        tokenPreview: "810000:****",
+        updatedAt: now.toISOString(),
+        webhookSecret: "transport-secret"
+      }]
+    };
+    const connectionBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>();
+    const providerHealthState = createTelegramPollingProviderHealthState();
+    const conversationRepository = ConversationRepository.inMemory();
+    let providerAvailable = true;
+    const poll = () => pollTelegramUpdatesOnce({
+      backoffBaseMs: 1_000,
+      connectionBackoff,
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher: async () => {
+        now.setTime(now.getTime() + 250);
+        if (providerAvailable) {
+          return { json: async () => ({ ok: true, result: [] }), ok: true, status: 200 };
+        }
+        throw new Error("telegram_transport_unavailable");
+      },
+      integrationRepository,
+      now: () => now,
+      providerHealthState
+    });
+
+    const healthy = await poll();
+    providerAvailable = false;
+    const first = await poll();
+    const skippedForBackoff = await poll();
+    now.setTime(now.getTime() + 1_000);
+    const retried = await poll();
+
+    assert.equal(healthy.providerHealth.status, "healthy");
+    assert.equal(healthy.providerHealth.lastSuccessfulPollAt, "2026-07-16T12:00:00.250Z", "the success timestamp is taken after getUpdates resolves");
+
+    assert.equal(first.failed, 1);
+    assert.equal(first.providerHealth.attemptedConnections, 1);
+    assert.equal(first.providerHealth.successfulConnections, 0);
+    assert.equal(first.providerHealth.status, "unhealthy");
+    assert.equal(first.providerHealth.lastSuccessfulPollAt, "2026-07-16T12:00:00.250Z");
+    assert.equal(first.providerHealth.lastFailureAt, "2026-07-16T12:00:00.500Z");
+    assert.equal(first.providerHealth.backoffConnections, 1);
+    assert.equal(first.providerHealth.earliestNextAttemptAt, "2026-07-16T12:00:01.500Z", "the retry is scheduled from the observed failure time");
+
+    assert.equal(skippedForBackoff.failed, 0, "a skipped pass has no new legacy processing failure");
+    assert.equal(skippedForBackoff.providerHealth.attemptedConnections, 0);
+    assert.equal(skippedForBackoff.providerHealth.failedConnections, 1);
+    assert.equal(skippedForBackoff.providerHealth.backoffConnections, 1);
+    assert.equal(skippedForBackoff.providerHealth.earliestNextAttemptAt, "2026-07-16T12:00:01.500Z");
+    assert.equal(skippedForBackoff.providerHealth.maxConsecutiveFailures, 1);
+    assert.equal(skippedForBackoff.providerHealth.status, "unhealthy");
+    assert.equal(skippedForBackoff.providerHealth.lastSuccessfulPollAt, "2026-07-16T12:00:00.250Z", "a historical success cannot make the active outage healthy");
+
+    assert.equal(retried.providerHealth.status, "unhealthy");
+    assert.equal(retried.providerHealth.maxConsecutiveFailures, 2);
+    assert.equal(retried.providerHealth.lastFailureAt, "2026-07-16T12:00:01.750Z");
+  });
+
   it("starts a stoppable polling loop for runtime telegram ingestion", async () => {
     let ticks = 0;
     const worker = startTelegramPollingWorker({
       intervalMs: 5,
       pollOnce: async () => {
         ticks += 1;
-        return { accepted: 0, duplicates: 0, failed: 0, polled: 0 };
+        return {
+          accepted: 0,
+          duplicates: 0,
+          failed: 0,
+          polled: 0,
+          providerHealth: {
+            activeConnections: 0,
+            attemptedConnections: 0,
+            backoffConnections: 0,
+            earliestNextAttemptAt: null,
+            failedConnections: 0,
+            lastFailureAt: null,
+            lastSuccessfulPollAt: null,
+            maxConsecutiveFailures: 0,
+            status: "idle",
+            successfulConnections: 0
+          }
+        };
       }
     });
 
@@ -350,17 +438,15 @@ describe("telegram polling ingress contracts", () => {
       }]
     });
     const conversationRepository = ConversationRepository.inMemory();
+    const connectionBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>();
 
     const result = await pollTelegramUpdatesOnce({
+      connectionBackoff,
       conversationRepository,
       conversationService: {
-        normalizeInboundEvent: async () => createEnvelope({
-          data: {},
-          error: { code: "inbound_failed", message: "Inbound processing failed." },
-          operation: "normalizeInboundEvent",
-          service: "channel-service",
-          status: "error"
-        })
+        normalizeInboundEvent: async () => {
+          throw new Error("inbound_processing_failed");
+        }
       },
       fetcher: async () => ({
         json: async () => ({
@@ -383,6 +469,10 @@ describe("telegram polling ingress contracts", () => {
     });
 
     assert.equal(result.failed, 1);
+    assert.equal(result.providerHealth.status, "healthy", "a post-fetch processing failure must not be reported as a Telegram provider failure");
+    assert.equal(result.providerHealth.successfulConnections, 1);
+    assert.equal(result.providerHealth.failedConnections, 0);
+    assert.equal(result.providerHealth.backoffConnections, 1, "processing errors keep their retry backoff without failing provider health");
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-failed-normalization"))?.pollingOffset, 41);
   });
 

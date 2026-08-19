@@ -17,7 +17,7 @@ import { CanonicalRoutingConversationRepository } from "../routing/canonical-rou
 import { CanonicalRoutingWorkloadAdapter } from "../routing/canonical-routing-workload.adapter.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { configureIntegrationRepository } from "./bootstrap.js";
-import { pollTelegramUpdatesOnce, startTelegramPollingWorker } from "./telegram-polling.worker.js";
+import { createTelegramPollingProviderHealthState, pollTelegramUpdatesOnce, startTelegramPollingWorker } from "./telegram-polling.worker.js";
 
 interface TelegramPollingRuntimeConfig {
   enabled: boolean;
@@ -52,6 +52,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
   const qualityService = new QualityService(configureQualityRepository(source));
   const offsets = new Map<string, number>();
   const connectionBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>();
+  const providerHealthState = createTelegramPollingProviderHealthState();
 
   startTelegramPollingWorker({
     intervalMs: config.intervalMs,
@@ -69,7 +70,8 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
             conversationService,
             connectionBackoff,
             integrationRepository,
-          apiBaseUrl: config.apiBaseUrl,
+            providerHealthState,
+            apiBaseUrl: config.apiBaseUrl,
             autoAssignConversation: (conversationId, tenantId) => routingService.autoAssignConversation(conversationId, { tenantId }),
             limit: config.limit,
             offsets,
@@ -78,7 +80,24 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
             runBotRuntime: (event) => automationService.handleBotRuntimeInboundEvent(event),
             timeoutMs: config.timeoutMs
           })
-        : { accepted: 0, duplicates: 0, failed: 0, polled: 0 };
+        : {
+            accepted: 0,
+            duplicates: 0,
+            failed: 0,
+            polled: 0,
+            providerHealth: {
+              activeConnections: 0,
+              attemptedConnections: 0,
+              backoffConnections: 0,
+              earliestNextAttemptAt: null,
+              failedConnections: 0,
+              lastFailureAt: null,
+              lastSuccessfulPollAt: null,
+              maxConsecutiveFailures: 0,
+              status: "idle" as const,
+              successfulConnections: 0
+            }
+          };
 
       writeStructuredLog("info", "Telegram polling worker run completed", {
         ...result,

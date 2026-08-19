@@ -51,11 +51,20 @@ if [[ -n "$telegram_worker" ]]; then
     fi
   done
   # Docker's relative --since clock is inconsistent on hosts configured with a
-  # local timezone while JSON container logs are UTC.  The worker itself has a
-  # health endpoint; inspecting its recent records avoids false alerts.
+  # local timezone while JSON container logs are UTC. Check that the worker is
+  # emitting heartbeats, but never treat a skipped backoff pass (`failed:0`) as
+  # proof that Telegram itself is reachable.
   worker_logs="$(docker logs --tail 200 "$telegram_worker" 2>&1)"
-  if ! grep -Fq '"enabled":true,"operation"' <<<"$worker_logs" || ! grep -Fq '"failed":0' <<<"$worker_logs"; then
-    failures+=("telegram-polling-worker has no successful polling heartbeat in recent logs")
+  if ! grep -Fq '"enabled":true,"operation"' <<<"$worker_logs"; then
+    failures+=("telegram-polling-worker has no polling heartbeat in recent logs")
+  fi
+
+  # This runs inside the worker so NODE_USE_ENV_PROXY and HTTPS_PROXY match the
+  # production ingress path. An intentionally invalid token must reach the Bot
+  # API and return 401; it neither exposes a real token nor follows the root
+  # redirect to core.telegram.org.
+  if ! docker exec "$telegram_worker" node -e "fetch('https://api.telegram.org/bot0:invalid/getMe', { signal: AbortSignal.timeout(15000) }).then((response) => process.exit(response.status === 401 ? 0 : 1)).catch(() => process.exit(1))"; then
+    failures+=("Telegram Bot API is unreachable through telegram-polling-worker proxy")
   fi
 fi
 

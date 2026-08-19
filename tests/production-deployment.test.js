@@ -109,4 +109,26 @@ describe("production deployment contract", () => {
     assert.doesNotMatch(deployScript, /application_compose up .*--remove-orphans/);
     assert.match(runbook, /ruvds-production-deploy\.sh deploy/);
   });
+
+  it("probes the Telegram Bot API through the polling worker instead of trusting backoff logs", () => {
+    const watchdog = readFileSync("deploy/scripts/production-integration-watchdog.sh", "utf8");
+
+    assert.match(watchdog, /fetch\('https:\/\/api\.telegram\.org\/bot0:invalid\/getMe'/);
+    assert.match(watchdog, /response\.status === 401/);
+    assert.match(watchdog, /Telegram Bot API is unreachable through telegram-polling-worker proxy/);
+    assert.doesNotMatch(watchdog, /grep -Fq '\"failed\":0'/);
+  });
+
+  it("selects a verified Telegram Xray fallback without observatory-driven flapping", () => {
+    const failover = readFileSync("deploy/scripts/telegram-xray-failover.sh", "utf8");
+    const service = readFileSync("deploy/systemd/support-communication-telegram-xray-failover.service", "utf8");
+    const timer = readFileSync("deploy/systemd/support-communication-telegram-xray-failover.timer", "utf8");
+
+    assert.match(failover, /bot0:invalid\/getMe/);
+    assert.match(failover, /TELEGRAM_XRAY_PRIMARY_TAG/);
+    assert.match(failover, /TELEGRAM_XRAY_FALLBACK_TAG/);
+    assert.match(failover, /xray-telegram\.service/);
+    assert.match(service, /telegram-xray-failover\.sh/);
+    assert.match(timer, /OnUnitActiveSec=30s/);
+  });
 });

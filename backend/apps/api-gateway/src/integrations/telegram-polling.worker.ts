@@ -42,12 +42,41 @@ export interface TelegramPollingInput {
   offsets?: Map<string, number>;
   now?: () => Date;
   phoneCollectionEnabled?: boolean;
+  providerHealthState?: TelegramPollingProviderHealthState;
   timeoutMs?: number;
 }
 
 export interface TelegramConnectionBackoffState {
   attempts: number;
   nextAttemptAt: number;
+}
+
+export interface TelegramPollingConnectionHealthState {
+  consecutiveFailures: number;
+  lastFailureAt?: number;
+  lastSuccessfulPollAt?: number;
+}
+
+export interface TelegramPollingProviderHealthState {
+  connections: Map<string, TelegramPollingConnectionHealthState>;
+}
+
+export type TelegramPollingProviderHealthStatus = "degraded" | "healthy" | "idle" | "unhealthy";
+
+export interface TelegramPollingProviderHealth {
+  activeConnections: number;
+  attemptedConnections: number;
+  backoffConnections: number;
+  earliestNextAttemptAt: string | null;
+  /** Active connections that still have an unresolved polling failure. */
+  failedConnections: number;
+  lastFailureAt: string | null;
+  /** Last accepted getUpdates response across active connections, not a loop tick. */
+  lastSuccessfulPollAt: string | null;
+  maxConsecutiveFailures: number;
+  status: TelegramPollingProviderHealthStatus;
+  /** Connections whose getUpdates request succeeded during this polling pass. */
+  successfulConnections: number;
 }
 
 export interface TelegramConnectionReader {
@@ -62,6 +91,7 @@ export interface TelegramPollingResult {
   duplicates: number;
   failed: number;
   polled: number;
+  providerHealth: TelegramPollingProviderHealth;
 }
 
 export interface TelegramPollingWorkerHandle {
@@ -129,6 +159,10 @@ interface TelegramMediaPayload {
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
+export function createTelegramPollingProviderHealthState(): TelegramPollingProviderHealthState {
+  return { connections: new Map<string, TelegramPollingConnectionHealthState>() };
+}
+
 export function startTelegramPollingWorker(input: TelegramPollingWorkerInput): TelegramPollingWorkerHandle {
   const intervalMs = Math.max(1, Number(input.intervalMs ?? 10_000));
   let stopped = false;
@@ -172,25 +206,46 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
   const fetcher = input.fetcher ?? globalThis.fetch;
   const offsets = input.offsets ?? new Map<string, number>();
   const connectionBackoff = input.connectionBackoff ?? new Map<string, TelegramConnectionBackoffState>();
-  const nowMs = (input.now?.() ?? new Date()).getTime();
+  const providerHealthState = input.providerHealthState ?? createTelegramPollingProviderHealthState();
+  const currentTimeMs = () => (input.now?.() ?? new Date()).getTime();
   const allConnections = input.integrationRepository.listTelegramConnectionsAsync
     ? await input.integrationRepository.listTelegramConnectionsAsync()
     : input.integrationRepository.listTelegramConnections();
   const connections = allConnections
     .filter((connection) => connection.status === "active" && String(connection.botToken ?? "").trim());
+  const activeConnectionKeys = new Set(connections.map(telegramCursorKey));
+  for (const cursorKey of providerHealthState.connections.keys()) {
+    if (!activeConnectionKeys.has(cursorKey)) {
+      providerHealthState.connections.delete(cursorKey);
+    }
+  }
   const result: TelegramPollingResult = {
     accepted: 0,
     duplicates: 0,
     failed: 0,
-    polled: connections.length
+    polled: connections.length,
+    providerHealth: {
+      activeConnections: connections.length,
+      attemptedConnections: 0,
+      backoffConnections: 0,
+      earliestNextAttemptAt: null,
+      failedConnections: 0,
+      lastFailureAt: null,
+      lastSuccessfulPollAt: null,
+      maxConsecutiveFailures: 0,
+      status: connections.length ? "healthy" : "idle",
+      successfulConnections: 0
+    }
   };
 
   for (const connection of connections) {
     const cursorKey = telegramCursorKey(connection);
     const backoff = connectionBackoff.get(cursorKey);
-    if (backoff && backoff.nextAttemptAt > nowMs) {
+    if (backoff && backoff.nextAttemptAt > currentTimeMs()) {
       continue;
     }
+    result.providerHealth.attemptedConnections += 1;
+    let providerPollSucceeded = false;
     try {
     const updates = await fetchTelegramUpdates({
       apiBaseUrl: input.apiBaseUrl,
@@ -200,6 +255,10 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       offset: offsets.get(cursorKey) ?? connection.pollingOffset,
       timeoutMs: input.timeoutMs ?? 10_000
     });
+    markTelegramPollingProviderSuccess(providerHealthState, cursorKey, currentTimeMs());
+    result.providerHealth.successfulConnections += 1;
+    connectionBackoff.delete(cursorKey);
+    providerPollSucceeded = true;
 
     for (const update of updates) {
       const rating = parseTelegramQualityRating(update as unknown as Record<string, unknown>);
@@ -359,26 +418,119 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
 
       await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
     }
-    connectionBackoff.delete(cursorKey);
     } catch (error) {
       result.failed += 1;
+      const failedAtMs = currentTimeMs();
       const attempts = (backoff?.attempts ?? 0) + 1;
       const baseMs = positiveBackoff(input.backoffBaseMs, 5_000);
       const maxMs = positiveBackoff(input.backoffMaxMs, 5 * 60_000);
       connectionBackoff.set(cursorKey, {
         attempts,
-        nextAttemptAt: nowMs + Math.min(maxMs, baseMs * (2 ** Math.min(attempts - 1, 10)))
+        nextAttemptAt: failedAtMs + Math.min(maxMs, baseMs * (2 ** Math.min(attempts - 1, 10)))
       });
-      writeStructuredLog("warn", "Telegram polling connection failed", {
-        error: error instanceof Error ? error.message : String(error),
-        operation: "telegram.polling.connection",
-        service: "telegram-polling-worker",
-        tenantId: connection.tenantId
-      });
+      if (providerPollSucceeded) {
+        writeStructuredLog("warn", "Telegram polling update processing failed", {
+          error: error instanceof Error ? error.message : String(error),
+          operation: "telegram.polling.processing",
+          service: "telegram-polling-worker",
+          tenantId: connection.tenantId
+        });
+      } else {
+        markTelegramPollingProviderFailure(providerHealthState, cursorKey, failedAtMs);
+        writeStructuredLog("warn", "Telegram polling connection failed", {
+          error: error instanceof Error ? error.message : String(error),
+          operation: "telegram.polling.connection",
+          service: "telegram-polling-worker",
+          tenantId: connection.tenantId
+        });
+      }
     }
   }
 
+  result.providerHealth = summarizeTelegramPollingProviderHealth({
+    attemptedConnections: result.providerHealth.attemptedConnections,
+    connectionBackoff,
+    connections,
+    nowMs: currentTimeMs(),
+    providerHealthState,
+    successfulConnections: result.providerHealth.successfulConnections
+  });
+
   return result;
+}
+
+function markTelegramPollingProviderSuccess(
+  state: TelegramPollingProviderHealthState,
+  cursorKey: string,
+  nowMs: number
+): void {
+  const current = state.connections.get(cursorKey);
+  state.connections.set(cursorKey, {
+    consecutiveFailures: 0,
+    lastFailureAt: current?.lastFailureAt,
+    lastSuccessfulPollAt: nowMs
+  });
+}
+
+function markTelegramPollingProviderFailure(
+  state: TelegramPollingProviderHealthState,
+  cursorKey: string,
+  nowMs: number
+): void {
+  const current = state.connections.get(cursorKey);
+  state.connections.set(cursorKey, {
+    consecutiveFailures: (current?.consecutiveFailures ?? 0) + 1,
+    lastFailureAt: nowMs,
+    lastSuccessfulPollAt: current?.lastSuccessfulPollAt
+  });
+}
+
+function summarizeTelegramPollingProviderHealth(input: {
+  attemptedConnections: number;
+  connectionBackoff: Map<string, TelegramConnectionBackoffState>;
+  connections: TelegramConnectionStoredRecord[];
+  nowMs: number;
+  providerHealthState: TelegramPollingProviderHealthState;
+  successfulConnections: number;
+}): TelegramPollingProviderHealth {
+  const connectionStates = input.connections.map((connection) => {
+    const cursorKey = telegramCursorKey(connection);
+    return {
+      backoff: input.connectionBackoff.get(cursorKey),
+      health: input.providerHealthState.connections.get(cursorKey)
+    };
+  });
+  const failedConnections = connectionStates.filter(({ health }) => (health?.consecutiveFailures ?? 0) > 0).length;
+  const nextAttempts = connectionStates
+    .map(({ backoff }) => backoff?.nextAttemptAt)
+    .filter((nextAttemptAt): nextAttemptAt is number => typeof nextAttemptAt === "number" && Number.isFinite(nextAttemptAt) && nextAttemptAt > input.nowMs);
+  const lastFailureAt = latestTimestamp(connectionStates.map(({ health }) => health?.lastFailureAt));
+  const lastSuccessfulPollAt = latestTimestamp(connectionStates.map(({ health }) => health?.lastSuccessfulPollAt));
+  const status: TelegramPollingProviderHealthStatus = input.connections.length === 0
+    ? "idle"
+    : failedConnections === 0
+      ? "healthy"
+      : failedConnections === input.connections.length
+        ? "unhealthy"
+        : "degraded";
+
+  return {
+    activeConnections: input.connections.length,
+    attemptedConnections: input.attemptedConnections,
+    backoffConnections: nextAttempts.length,
+    earliestNextAttemptAt: nextAttempts.length ? new Date(Math.min(...nextAttempts)).toISOString() : null,
+    failedConnections,
+    lastFailureAt: lastFailureAt === undefined ? null : new Date(lastFailureAt).toISOString(),
+    lastSuccessfulPollAt: lastSuccessfulPollAt === undefined ? null : new Date(lastSuccessfulPollAt).toISOString(),
+    maxConsecutiveFailures: Math.max(0, ...connectionStates.map(({ health }) => health?.consecutiveFailures ?? 0)),
+    status,
+    successfulConnections: input.successfulConnections
+  };
+}
+
+function latestTimestamp(values: Array<number | undefined>): number | undefined {
+  const timestamps = values.filter((value): value is number => Number.isFinite(value));
+  return timestamps.length ? Math.max(...timestamps) : undefined;
 }
 
 function positiveBackoff(value: number | undefined, fallback: number): number {

@@ -68,6 +68,7 @@
     "test:quality-workflows": "node --test tests/quality-workflows.test.js",
     "test:automation-workflows": "node --test tests/automation-workflows.test.js",
     "test:ui-mutation-guards": "node --test tests/ui-mutation-guards.test.js",
+    "test:release-smoke": "playwright test --grep @release",
     "test:services": "node --test tests/backend-services.test.js",
     "test:smoke": "playwright test tests/smoke.spec.js",
     "widget:build": "npm run build --prefix packages/web-widget",

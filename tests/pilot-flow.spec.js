@@ -16,7 +16,7 @@ test("widget demo page loads and SupportWidget.init is available", async ({ page
   expect(hasInit).toBeTruthy();
 });
 
-test("operator app opens only after backend tenant state confirms session", async ({ page, request }) => {
+test("operator app opens only after backend tenant state confirms session @release", async ({ page, request }) => {
   const loginResponse = await request.post("/api/v1/auth/tenant/login", {
     data: {
       email: "sergey@volga.example",
@@ -84,7 +84,7 @@ test("outbound backend failure keeps launcher open with inline error", async ({ 
   await expect(page.locator(".outbound-error")).toContainText("Backend requires a topic");
 });
 
-test("outbound quick action creates backend descriptor and visible queued dialog", async ({ page, request }) => {
+test("outbound quick action creates backend descriptor and visible queued dialog @release", async ({ page, request }) => {
   const loginResponse = await request.post("/api/v1/auth/tenant/login", {
     data: {
       email: "sergey@volga.example",

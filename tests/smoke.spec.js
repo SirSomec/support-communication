@@ -657,7 +657,7 @@ test("conversation queue filters remain actionable", async ({ page }) => {
   await expectHealthyPage(page);
 });
 
-test("conversation queue derives activity time and order from timestamps", async ({ page }) => {
+test("conversation queue derives activity time and order from timestamps @release", async ({ page }) => {
   const now = Date.now();
   const items = [
     {
@@ -1920,7 +1920,7 @@ test("route namespaces keep public auth and service admin isolated", async ({ pa
   await expectHealthyPage(page);
 });
 
-test("auth flow covers login 2fa recovery invite and organization selection", async ({ page }) => {
+test("auth flow covers login 2fa recovery invite and organization selection @release", async ({ page }) => {
   await page.goto("/#/login");
   await expect(page.getByTestId("route-auth-login")).toBeVisible();
 
@@ -1985,7 +1985,7 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
   await expectHealthyPage(page);
 });
 
-test("dialog assignment persists from the responsive operator workspace", async ({ page }) => {
+test("dialog assignment persists from the responsive operator workspace @release", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openAppShell(page);
   await selectRole(page, "Администратор");
@@ -2016,7 +2016,7 @@ test("dialog assignment persists from the responsive operator workspace", async 
   await expectHealthyPage(page);
 });
 
-test("service admin critical actions require reason confirmation and audit", async ({ page }) => {
+test("service admin critical actions require reason confirmation and audit @release", async ({ page }) => {
   await openServiceAdminShell(page);
 
   await page.locator(".service-admin-tabs button").filter({ hasText: "Пользователи" }).click();

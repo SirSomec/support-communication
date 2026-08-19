@@ -54,7 +54,8 @@ jobs:
         run: npm run production:config:check -- --schema-only deploy/env/production.env.example
 
   e2e:
-    name: Playwright (isolated smoke database)
+    name: Playwright release smoke (isolated database)
+    if: github.event_name == 'push'
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -72,11 +73,19 @@ jobs:
         working-directory: backend
       - run: npm run prisma:generate
         working-directory: backend
-      - run: npx playwright install --with-deps chromium
+      - name: Restore Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - name: Install Chromium
+        run: npx playwright install chromium
       - name: Start isolated Postgres
         run: docker compose up -d --wait postgres
-      - name: Run browser specs
-        run: npx playwright test
+      - name: Run release browser smoke
+        run: npm run test:release-smoke
         env:
           CI: "true"
           SMOKE_DATABASE_NAME: support_communication_smoke_ci_${{ github.run_id }}_${{ github.run_attempt }}

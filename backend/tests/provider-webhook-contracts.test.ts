@@ -127,7 +127,7 @@ describe("VK and MAX provider webhooks", () => {
     }
   });
 
-  it("records a MAX CSAT callback and treats the next message as feedback", async () => {
+  it("records a MAX CSAT callback and requires an explicit feedback action", async () => {
     const runtime = providerRuntime("max", "conn-max", "max-secret");
     const first = await receive(runtime, "MAX", {
       message: { body: { mid: "max-csat-1", text: "Help" }, recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
@@ -156,14 +156,14 @@ describe("VK and MAX provider webhooks", () => {
       channel: "MAX", clientId: "92", conversationId: conversation.id,
       idempotencyKey: "max:conn-max:max-callback-1", operator: "operator-1", scale: "CSAT", score: 5, topic: conversation.topic
     });
-    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "offered");
 
     const feedback = await receive(runtime, "MAX", {
       message: { body: { mid: "max-csat-feedback", text: "Спасибо" }, recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
       update_type: "message_created"
     }, { "x-max-bot-api-secret": "max-secret" });
-    assert.equal(feedback.data.recordedAsFeedback, true);
-    assert.equal((await runtime.conversations.findConversation(conversation.id))?.messages.at(-1)?.type, "csat_feedback");
+    assert.equal(feedback.data.recordedAsFeedback, false);
+    assert.notEqual(feedback.data.conversationId, conversation.id);
   });
 
   it("records a VK CSAT callback and offers the feedback flow", async () => {
@@ -190,7 +190,7 @@ describe("VK and MAX provider webhooks", () => {
       channel: "VK", clientId: "77", conversationId: conversation.id,
       idempotencyKey: "vk:conn-vk:vk-callback-1", operator: "operator-1", scale: "CSAT", score: 4, topic: conversation.topic
     });
-    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "offered");
     assert.equal(messages[0]?.peerId, "701");
     assert.equal((messages[0]?.keyboard as any)?.inline, true);
     assert.deepEqual(answers[0], {

@@ -533,12 +533,16 @@ describe("telegram polling ingress contracts", () => {
         update_id: 501
       }],
       [{
-        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 902, text: "Спасибо, оператор очень помог" },
+        callback_query: { data: "quality:feedback:start", id: "cbq-501-feedback", message: { chat: { id: 445566 }, message_id: 902 } },
         update_id: 502
       }],
       [{
-        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 903, text: "У меня новый вопрос" },
+        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 902, text: "Спасибо, оператор очень помог" },
         update_id: 503
+      }],
+      [{
+        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 903, text: "У меня новый вопрос" },
+        update_id: 504
       }]
     ];
     const requestedUrls: string[] = [];
@@ -568,13 +572,15 @@ describe("telegram polling ingress contracts", () => {
     );
     const promptUrl = requestedUrls.find((url) => url.includes("/sendMessage"));
     assert.ok(promptUrl, "the feedback prompt must be sent");
-    assert.ok(decodeURIComponent(promptUrl!).includes("quality:feedback:new_appeal"), "the prompt must offer a new appeal button");
+    assert.ok(decodeURIComponent(promptUrl!).includes("quality:feedback:start"), "the prompt must offer a feedback button");
     const awaiting = await conversationRepository.findConversation(conversation!.id);
-    assert.equal(awaiting?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal(awaiting?.metadata?.csatFeedback?.state, "offered");
     assert.equal(awaiting?.metadata?.csatFeedback?.ratingId, "rating-501");
 
-    // 2. Следующее сообщение — отзыв: остается в закрытом обращении, без форка.
+    // 2. Клиент явно включает режим отзыва.
     requestedUrls.length = 0;
+    const startFeedbackPoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(startFeedbackPoll.accepted, 1);
     const feedbackPoll = await pollTelegramUpdatesOnce(pollInput);
     assert.equal(feedbackPoll.accepted, 1);
     const appeals = await conversationRepository.listConversations({ tenantId: "tenant-feedback" });
@@ -637,7 +643,7 @@ describe("telegram polling ingress contracts", () => {
         update_id: 601
       }],
       [{
-        callback_query: { data: "quality:feedback:new_appeal", id: "cbq-602", message: { chat: { id: 556677 }, message_id: 912 } },
+        callback_query: { data: "quality:feedback:start", id: "cbq-602", message: { chat: { id: 556677 }, message_id: 912 } },
         update_id: 602
       }],
       [{
@@ -664,13 +670,13 @@ describe("telegram polling ingress contracts", () => {
     };
 
     await pollTelegramUpdatesOnce(pollInput);
-    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "offered");
 
     // «Новое обращение»: ожидание снято, промпт скрыт, callback подтвержден.
     requestedUrls.length = 0;
     const declinePoll = await pollTelegramUpdatesOnce(pollInput);
     assert.equal(declinePoll.accepted, 1);
-    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "declined");
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
     assert.ok(requestedUrls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=912")), "the feedback prompt must be hidden");
     assert.ok(requestedUrls.some((url) => url.includes("/answerCallbackQuery") && url.includes("callback_query_id=cbq-602")));
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-feedback-decline"))?.pollingOffset, 603);
@@ -678,8 +684,8 @@ describe("telegram polling ingress contracts", () => {
     const followUpPoll = await pollTelegramUpdatesOnce(pollInput);
     assert.equal(followUpPoll.accepted, 1);
     const appeals = await conversationRepository.listConversations({ tenantId: "tenant-feedback-decline" });
-    assert.equal(appeals.length, 2, "a message after the declined feedback must open a new appeal");
-    assert.equal(appeals.find((item) => item.id !== conversation!.id)?.messages.at(-1)?.text, "Другая проблема");
+    assert.equal(appeals.length, 1, "an explicitly started feedback must stay in the rated appeal");
+    assert.equal(appeals[0]?.messages.at(-1)?.type, "csat_feedback");
   });
 
   it("credits a rating to the bot when the appeal was closed without any operator trace", async () => {
@@ -739,7 +745,7 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(result.accepted, 1, "a bot-closed appeal must still accept the rating");
     assert.equal(result.failed, 0);
     assert.equal(ratings[0]?.operator, "ai-bot");
-    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "offered");
   });
 
   it("attaches a rating to the latest closed appeal and its closing operator when the dialog was never assigned", async () => {

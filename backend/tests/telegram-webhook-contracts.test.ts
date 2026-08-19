@@ -396,13 +396,17 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(rated.status, "ok");
     assert.equal(rated.data.feedbackPromptOffered, true);
     assert.ok(telegramCalls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=801")), "the survey must be hidden");
-    assert.ok(telegramCalls.some((url) => url.includes("/sendMessage") && decodeURIComponent(url).includes("quality:feedback:new_appeal")), "the prompt must offer the new appeal button");
-    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.ok(telegramCalls.some((url) => url.includes("/sendMessage") && decodeURIComponent(url).includes("quality:feedback:start")), "the prompt must offer the feedback button");
+    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "offered");
+
+    await handleTelegramWebhookFromRoute(baseInput({
+      callback_query: { data: "quality:feedback:start", id: "callback-feedback-77", message: { chat: { id: 445577 }, message_id: 802 } }, update_id: 9061
+    }), config);
 
     // 2. Сообщение в окне ожидания — отзыв в том же закрытом обращении.
     const feedback = await handleTelegramWebhookFromRoute(baseInput({
       message: { chat: { id: 445577 }, from: { first_name: "Feedback" }, message_id: 802, text: "Очень быстро помогли" },
-      update_id: 9061
+      update_id: 9062
     }), config);
     assert.equal(feedback.status, "ok");
     assert.equal(feedback.data.recordedAsFeedback, true);
@@ -419,7 +423,7 @@ describe("telegram webhook ingress contracts", () => {
     // 3. После полученного отзыва следующее сообщение открывает новое обращение.
     const followUp = await handleTelegramWebhookFromRoute(baseInput({
       message: { chat: { id: 445577 }, from: { first_name: "Feedback" }, message_id: 803, text: "Новый вопрос" },
-      update_id: 9062
+      update_id: 9063
     }), config);
     assert.equal(followUp.status, "ok");
     assert.notEqual(followUp.data.conversationId, conversation!.id, "a message after the feedback must open a new appeal");
@@ -471,11 +475,15 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(rated.data.feedbackPromptOffered, true);
     assert.equal(ratings[0]?.operator, "ai-bot", "the rating is credited to the bot, not rejected");
     assert.ok(telegramCalls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=831")), "the survey must be hidden");
-    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "offered");
+
+    await handleTelegramWebhookFromRoute(input({
+      callback_query: { data: "quality:feedback:start", id: "callback-bot-feedback", message: { chat: { id: 445600 }, message_id: 832 } }, update_id: 9091
+    }), config);
 
     const feedback = await handleTelegramWebhookFromRoute(input({
       message: { chat: { id: 445600 }, from: { first_name: "Bot Closed" }, message_id: 832, text: "Бот ответил быстро и по делу" },
-      update_id: 9091
+      update_id: 9092
     }), config);
     assert.equal(feedback.status, "ok");
     assert.equal(feedback.data.recordedAsFeedback, true);
@@ -562,16 +570,16 @@ describe("telegram webhook ingress contracts", () => {
       callback_query: { data: "quality:csat:3", id: "callback-88", message: { chat: { id: 445588 }, message_id: 811 } },
       update_id: 9070
     }), config);
-    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "offered");
 
     telegramCalls.length = 0;
     const declined = await handleTelegramWebhookFromRoute(input({
-      callback_query: { data: "quality:feedback:new_appeal", id: "callback-89", message: { chat: { id: 445588 }, message_id: 812 } },
+      callback_query: { data: "quality:feedback:start", id: "callback-89", message: { chat: { id: 445588 }, message_id: 812 } },
       update_id: 9071
     }), config);
     assert.equal(declined.status, "ok");
-    assert.equal(declined.data.declined, true);
-    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "declined");
+    assert.equal(declined.data.started, true);
+    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
     assert.ok(telegramCalls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=812")), "the feedback prompt must be hidden");
     assert.ok(telegramCalls.some((url) => url.includes("/answerCallbackQuery") && url.includes("callback_query_id=callback-89")));
 
@@ -580,7 +588,8 @@ describe("telegram webhook ingress contracts", () => {
       update_id: 9072
     }), config);
     assert.equal(followUp.status, "ok");
-    assert.notEqual(followUp.data.conversationId, conversation!.id, "after the decline a message must open a new appeal");
+    assert.equal(followUp.data.conversationId, conversation!.id);
+    assert.equal(followUp.data.recordedAsFeedback, true);
   });
 
   it("keeps an active bot dialog unassigned and assigns it after bot handoff", async () => {

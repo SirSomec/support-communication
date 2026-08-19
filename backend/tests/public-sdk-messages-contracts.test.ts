@@ -307,7 +307,7 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal(ratings[0]?.clientId, "visitor-rating-001");
   });
 
-  it("offers a feedback comment after a rating and stores the next message as feedback without a new appeal", async () => {
+  it("stores feedback only after the client explicitly starts it", async () => {
     const { baseUrl } = await createTestApiApp(apps);
     const send = await publicPost(baseUrl, "/public/sdk/messages", {
       externalId: "visitor-feedback-001",
@@ -337,6 +337,12 @@ describe("public sdk message ingress and widget poll contracts", () => {
     });
     assert.equal(rated.status, "ok");
     assert.deepEqual(rated.data.feedback, { offered: true });
+    assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "offered");
+
+    const startFeedback = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/csat-feedback/decline`, {
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.equal(startFeedback.status, "ok");
     assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "awaiting");
 
     // Сообщение в окне ожидания — отзыв: то же обращение, без бота и форка.
@@ -434,6 +440,9 @@ describe("public sdk message ingress and widget poll contracts", () => {
     const ratings = await QualityRepository.default().listQualityRatings({ tenantId: TENANT_ID });
     assert.equal(ratings[0]?.operator, "ai-bot", "the rating is credited to the bot");
 
+    await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/csat-feedback/decline`, {
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
     const feedback = await publicPost(baseUrl, "/public/sdk/messages", {
       conversationId,
       externalId: "visitor-bot-closed",
@@ -468,23 +477,23 @@ describe("public sdk message ingress and widget poll contracts", () => {
       visitorSessionToken: `${send.data.visitorSessionToken}tampered`
     });
     assert.equal(tampered.status, "denied");
-    assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "offered");
 
     const declined = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/csat-feedback/decline`, {
       visitorSessionToken: String(send.data.visitorSessionToken)
     });
     assert.equal(declined.status, "ok");
     assert.equal(declined.data.declined, true);
-    assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "declined");
+    assert.equal((await conversations.findConversation(conversationId))?.metadata?.csatFeedback?.state, "awaiting");
 
-    // Ожидание снято: сообщение открывает новое обращение, а не отзыв.
+    // До нажатия кнопки сообщение открыло бы новое обращение; после него это отзыв.
     const followUp = await publicPost(baseUrl, "/public/sdk/messages", {
       externalId: "visitor-feedback-decline",
       text: "Другой вопрос"
     });
     assert.equal(followUp.status, "ok");
-    assert.notEqual(followUp.data.conversationId, conversationId);
-    assert.equal((await conversations.listConversations({ tenantId: TENANT_ID })).length, 2);
+    assert.equal(followUp.data.conversationId, conversationId);
+    assert.equal(followUp.data.recordedAsFeedback, true);
   });
 
   it("rejects invalid rating input, visitor token and API key scope", async () => {

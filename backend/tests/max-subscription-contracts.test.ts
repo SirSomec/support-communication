@@ -18,7 +18,7 @@ describe("MAX webhook subscription", () => {
     assert.deepEqual(call?.init.headers, { Authorization: "max-token", "Content-Type": "application/json" });
     assert.deepEqual(JSON.parse(call?.init.body), {
       secret: "secret_123",
-      update_types: ["message_created", "bot_started"],
+      update_types: ["message_created", "message_callback", "bot_started"],
       url: "https://support.example.com/api/v1/webhooks/max/conn-1"
     });
   });

@@ -21,10 +21,10 @@ export interface MaxWebhookSubscriptionInput {
 }
 
 const DEFAULT_MAX_API_BASE_URL = "https://platform-api2.max.ru";
-// `message_callback` is available through MAX long polling, but is not an
-// accepted webhook subscription type.  Keep this list aligned with MAX's
-// POST /subscriptions contract.
-const DEFAULT_UPDATE_TYPES = ["message_created", "bot_started"];
+// Callback buttons emit `message_callback` through both Webhook and Long
+// Polling. Subscribe to it with inbound messages so inline CSAT controls work
+// for every newly connected MAX bot.
+const DEFAULT_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 /** Registers the only production ingress supported by MAX Bot API. */
 export async function subscribeMaxWebhook(input: MaxWebhookSubscriptionInput): Promise<void> {

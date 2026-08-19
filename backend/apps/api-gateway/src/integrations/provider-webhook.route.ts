@@ -441,15 +441,18 @@ function parseMaxQualityRating(body: Record<string, unknown>): {
   const payload = value(callback.payload ?? callback.data ?? body.payload);
   const match = /^quality:csat:([1-5])$/i.exec(payload);
   const message = record(callback.message) ?? record(body.message);
-  const sender = record(message?.sender) ?? record(callback.user) ?? record(body.user);
+  // In a MAX callback update, message.sender is the bot that sent the
+  // keyboard. The person who pressed it is supplied separately as
+  // callback.user, so prefer that identity for the CSAT client record.
+  const actor = record(callback.user) ?? record(body.user) ?? record(message?.sender);
   const recipient = record(message?.recipient);
   const providerConversationId = value(recipient?.chat_id ?? recipient?.user_id ?? callback.chat_id ?? body.chat_id);
-  const providerUserId = value(sender?.user_id ?? sender?.id ?? callback.user_id ?? body.user_id);
+  const providerUserId = value(actor?.user_id ?? actor?.id ?? callback.user_id ?? body.user_id);
   const callbackId = value(callback.callback_id ?? callback.id);
   if (!match || !providerConversationId || !callbackId) return null;
   return {
     callbackId,
-    displayName: value(sender?.name) || `MAX ${providerUserId || providerConversationId}`,
+    displayName: value(actor?.name) || `MAX ${providerUserId || providerConversationId}`,
     providerConversationId,
     providerUserId,
     score: Number(match[1])

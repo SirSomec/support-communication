@@ -145,9 +145,10 @@ describe("VK and MAX provider webhooks", () => {
       updates: [{
         callback: {
           callback_id: "max-callback-1",
-          message: { recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
-          payload: "quality:csat:5"
+          payload: "quality:csat:5",
+          user: { name: "Client", user_id: 92 }
         },
+        message: { recipient: { chat_id: 601 }, sender: { name: "Support bot", user_id: 900 } },
         update_type: "message_callback"
       }]
     }, { "x-max-bot-api-secret": "max-secret" });

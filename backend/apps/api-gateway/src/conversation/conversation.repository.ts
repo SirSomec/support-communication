@@ -1997,7 +1997,7 @@ function csatFeedbackStateFromJson(value: unknown): ConversationAppealMetadata["
   }
 
   const state = String(record.state ?? "").trim();
-  if (state !== "awaiting" && state !== "received" && state !== "declined") {
+  if (state !== "offered" && state !== "awaiting" && state !== "received" && state !== "declined") {
     return undefined;
   }
 

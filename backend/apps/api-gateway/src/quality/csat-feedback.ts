@@ -11,13 +11,13 @@ import type {
 export const CSAT_FEEDBACK_WINDOW_MS = 30 * 60 * 1000;
 
 export const CSAT_FEEDBACK_MESSAGE_TYPE = "csat_feedback";
-export const CSAT_FEEDBACK_NEW_APPEAL_CALLBACK = "quality:feedback:new_appeal";
-export const CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT = "Новое обращение";
+export const CSAT_FEEDBACK_START_CALLBACK = "quality:feedback:start";
+export const CSAT_FEEDBACK_START_BUTTON_TEXT = "Оставить отзыв";
 
 export const CSAT_FEEDBACK_PROMPT_TEXT =
-  "Спасибо за оценку! Хотите оставить комментарий — напишите его следующим сообщением, мы передадим его команде. Чтобы задать новый вопрос, нажмите «Новое обращение».";
+  "Спасибо за оценку! Если хотите оставить отзыв, нажмите «Оставить отзыв». Чтобы задать новый вопрос, просто отправьте сообщение — мы создадим новое обращение.";
 export const CSAT_FEEDBACK_ACK_TEXT = "Спасибо за отзыв! Мы передали его команде.";
-export const CSAT_FEEDBACK_NEW_APPEAL_TEXT = "Напишите сообщение — и мы откроем новое обращение.";
+export const CSAT_FEEDBACK_START_TEXT = "Напишите отзыв следующим сообщением — мы передадим его команде.";
 
 export function conversationCsatFeedback(conversation: ConversationRecord): ConversationCsatFeedbackState | null {
   const feedback = conversation.metadata?.csatFeedback;
@@ -25,7 +25,7 @@ export function conversationCsatFeedback(conversation: ConversationRecord): Conv
     return null;
   }
   const state = String(feedback.state ?? "").trim();
-  if (state !== "awaiting" && state !== "received" && state !== "declined") {
+  if (state !== "offered" && state !== "awaiting" && state !== "received" && state !== "declined") {
     return null;
   }
   return {

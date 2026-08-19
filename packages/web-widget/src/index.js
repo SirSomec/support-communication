@@ -1069,11 +1069,11 @@ function renderShell() {
   feedback.className = "sw-feedback";
   feedback.hidden = true;
   const feedbackLabel = document.createElement("span");
-  feedbackLabel.textContent = "Хотите оставить отзыв? Напишите его сообщением — мы передадим команде.";
+  feedbackLabel.textContent = "Если хотите оставить отзыв, нажмите кнопку. Новый вопрос можно просто отправить сообщением.";
   const feedbackNewAppeal = document.createElement("button");
   feedbackNewAppeal.type = "button";
   feedbackNewAppeal.className = "sw-feedback__new-appeal";
-  feedbackNewAppeal.textContent = "Новое обращение";
+  feedbackNewAppeal.textContent = "Оставить отзыв";
   feedback.append(feedbackLabel, feedbackNewAppeal);
   const composer = document.createElement("form");
   composer.className = "sw-composer";

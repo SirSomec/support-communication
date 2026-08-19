@@ -3,9 +3,9 @@ import type { ConversationRepository } from "../conversation/conversation.reposi
 import type { ConversationRecord } from "../conversation/conversation.types.js";
 import {
   CSAT_FEEDBACK_ACK_TEXT,
-  CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
-  CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
-  CSAT_FEEDBACK_NEW_APPEAL_TEXT,
+  CSAT_FEEDBACK_START_BUTTON_TEXT,
+  CSAT_FEEDBACK_START_CALLBACK,
+  CSAT_FEEDBACK_START_TEXT,
   CSAT_FEEDBACK_PROMPT_TEXT,
   conversationCsatFeedback,
   csatFeedbackConversationMutation,
@@ -49,11 +49,11 @@ export async function offerTelegramCsatFeedbackAfterRating(input: {
   // спамить клиента повторными промптами: активное ожидание лишь обновляет
   // привязку к последней оценке.
   const current = conversationCsatFeedback(conversation);
-  const alreadyAwaiting = isAwaitingCsatFeedback(conversation);
+  const alreadyAwaiting = conversationCsatFeedback(conversation)?.state === "offered";
   const updated = withCsatFeedback(conversation, {
     offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
     ratingId: input.ratingId,
-    state: "awaiting"
+    state: "offered"
   });
   await input.conversationRepository.saveConversationMutation(
     csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId: input.ratingId })
@@ -72,7 +72,7 @@ export async function offerTelegramCsatFeedbackAfterRating(input: {
   await callTelegramApi(input.api, "sendMessage", {
     chat_id: input.chatId,
     reply_markup: JSON.stringify({
-      inline_keyboard: [[{ callback_data: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK, text: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT }]]
+      inline_keyboard: [[{ callback_data: CSAT_FEEDBACK_START_CALLBACK, text: CSAT_FEEDBACK_START_BUTTON_TEXT }]]
     }),
     text: CSAT_FEEDBACK_PROMPT_TEXT
   }, conversation.id);
@@ -82,7 +82,7 @@ export async function offerTelegramCsatFeedbackAfterRating(input: {
 
 // Кнопка «Новое обращение»: клиент не хочет оставлять отзыв — снимаем
 // ожидание (следующее сообщение снова откроет обращение) и прячем промпт.
-export async function declineTelegramCsatFeedback(input: {
+export async function startTelegramCsatFeedback(input: {
   api: TelegramCsatApiAccess;
   callbackQueryId?: string;
   chatId: string;
@@ -91,18 +91,18 @@ export async function declineTelegramCsatFeedback(input: {
   promptMessageId?: string;
 }): Promise<{ declined: boolean }> {
   const conversation = input.conversation;
-  let declined = false;
-  if (isAwaitingCsatFeedback(conversation)) {
+  let started = false;
+  if (conversationCsatFeedback(conversation)?.state === "offered") {
     const current = conversationCsatFeedback(conversation);
     const updated = withCsatFeedback(conversation, {
       offeredAt: current?.offeredAt ?? new Date().toISOString(),
       ratingId: current?.ratingId ?? "",
-      state: "declined"
+      state: "awaiting"
     });
     await input.conversationRepository.saveConversationMutation(
-      csatFeedbackConversationMutation(updated, "quality.feedback.declined", { ratingId: current?.ratingId ?? null })
+      csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId: current?.ratingId ?? null })
     );
-    declined = true;
+    started = true;
   }
 
   if (input.promptMessageId) {
@@ -116,14 +116,14 @@ export async function declineTelegramCsatFeedback(input: {
       callback_query_id: input.callbackQueryId
     }, conversation.id);
   }
-  if (declined) {
+  if (started) {
     await callTelegramApi(input.api, "sendMessage", {
       chat_id: input.chatId,
-      text: CSAT_FEEDBACK_NEW_APPEAL_TEXT
+      text: CSAT_FEEDBACK_START_TEXT
     }, conversation.id);
   }
 
-  return { declined };
+  return { started };
 }
 
 // Подтверждение принятого отзыва в чате клиента.

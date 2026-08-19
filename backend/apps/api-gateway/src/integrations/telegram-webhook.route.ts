@@ -13,14 +13,14 @@ import {
   resolveOrForkAppealConversation,
   type AppealConversationMutation
 } from "../conversation/appeal-lifecycle.js";
-import { CSAT_FEEDBACK_NEW_APPEAL_CALLBACK } from "../quality/csat-feedback.js";
+import { CSAT_FEEDBACK_START_CALLBACK } from "../quality/csat-feedback.js";
 import { AI_CLOSED_CONVERSATION_OPERATOR } from "../quality/quality.types.js";
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import { resolveConnectionRoutingQueue } from "./routing-queue.js";
 import { resolveTelegramTenantByWebhookSecret, type TelegramHttpFetch } from "./telegram-channel-connection.js";
 import {
   acknowledgeTelegramCsatFeedback,
-  declineTelegramCsatFeedback,
+  startTelegramCsatFeedback,
   offerTelegramCsatFeedbackAfterRating
 } from "./telegram-csat-feedback.js";
 import {
@@ -146,33 +146,33 @@ export async function handleTelegramWebhookFromRoute(
     });
   }
 
-  const feedbackDecline = parseTelegramCsatFeedbackDecline(input.body);
-  if (feedbackDecline) {
+  const feedbackStart = parseTelegramCsatFeedbackStart(input.body);
+  if (feedbackStart) {
     const target = await resolveTelegramRatedTarget(input.conversationRepository, {
       botId: tenantConnection?.botId ?? undefined,
-      chatId: feedbackDecline.chatId,
+      chatId: feedbackStart.chatId,
       tenantId
     });
     if (!target) {
       return deniedEnvelope("telegram_quality_conversation_unresolved", "Conversation awaiting CSAT feedback could not be resolved.");
     }
-    const declined = await declineTelegramCsatFeedback({
+    const started = await startTelegramCsatFeedback({
       api: telegramApi,
-      callbackQueryId: feedbackDecline.callbackQueryId,
-      chatId: feedbackDecline.chatId,
+      callbackQueryId: feedbackStart.callbackQueryId,
+      chatId: feedbackStart.chatId,
       conversation: target.conversation,
       conversationRepository: input.conversationRepository,
-      promptMessageId: feedbackDecline.messageId
+      promptMessageId: feedbackStart.messageId
     });
     return createEnvelope({
       service: INTEGRATION_SERVICE,
-      operation: "receiveTelegramCsatFeedbackDecline",
+      operation: "receiveTelegramCsatFeedbackStart",
       meta: { channel: "telegram", source: "telegram-bot-api", tenantId },
       data: {
         accepted: true,
-        callbackQueryId: feedbackDecline.callbackQueryId,
+        callbackQueryId: feedbackStart.callbackQueryId,
         conversationId: target.conversation.id,
-        declined: declined.declined
+        started: started.started
       }
     });
   }
@@ -746,12 +746,12 @@ export function parseTelegramQualityRating(body: Record<string, unknown>): {
 }
 
 // Кнопка «Новое обращение» под промптом отзыва.
-export function parseTelegramCsatFeedbackDecline(body: Record<string, unknown>): {
+export function parseTelegramCsatFeedbackStart(body: Record<string, unknown>): {
   callbackQueryId: string; chatId: string; messageId?: string;
 } | null {
   const callback = body.callback_query as Record<string, unknown> | undefined;
   if (!callback || typeof callback !== "object") return null;
-  if (String(callback.data ?? "").trim() !== CSAT_FEEDBACK_NEW_APPEAL_CALLBACK) return null;
+  if (String(callback.data ?? "").trim() !== CSAT_FEEDBACK_START_CALLBACK) return null;
   const message = callback.message as Record<string, unknown> | undefined;
   const chat = message?.chat as Record<string, unknown> | undefined;
   const chatId = String(chat?.id ?? "").trim();

@@ -544,7 +544,7 @@ export async function handlePublicSdkQualityRatingFromRoute(
     const updated = withCsatFeedback(conversation, {
       offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
       ratingId,
-      state: "awaiting"
+      state: "offered"
     });
     await input.conversationRepository.saveConversationMutation(
       csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId })
@@ -602,15 +602,15 @@ export async function handlePublicSdkCsatFeedbackDeclineFromRoute(
   }
 
   let declined = false;
-  if (isAwaitingCsatFeedback(conversation)) {
+  if (conversationCsatFeedback(conversation)?.state === "offered") {
     const current = conversationCsatFeedback(conversation);
     const updated = withCsatFeedback(conversation, {
       offeredAt: current?.offeredAt ?? new Date().toISOString(),
       ratingId: current?.ratingId ?? "",
-      state: "declined"
+      state: "awaiting"
     });
     await input.conversationRepository.saveConversationMutation(
-      csatFeedbackConversationMutation(updated, "quality.feedback.declined", { ratingId: current?.ratingId ?? null })
+      csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId: current?.ratingId ?? null })
     );
     declined = true;
   }

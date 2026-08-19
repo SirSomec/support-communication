@@ -14,7 +14,7 @@ export interface ConversationMessage {
 export interface ConversationCsatFeedbackState {
   offeredAt: string;
   ratingId: string;
-  state: "awaiting" | "received" | "declined";
+  state: "offered" | "awaiting" | "received" | "declined";
 }
 
 export interface ConversationAppealMetadata {

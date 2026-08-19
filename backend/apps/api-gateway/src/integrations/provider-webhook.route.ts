@@ -8,9 +8,9 @@ import { resolveOrCreateProviderConversation } from "./provider-conversation.js"
 import type { ProviderMessageBindingRepository } from "./provider-message-binding.repository.js";
 import {
   conversationCsatFeedback,
-  CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
-  CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
-  CSAT_FEEDBACK_NEW_APPEAL_TEXT,
+  CSAT_FEEDBACK_START_BUTTON_TEXT,
+  CSAT_FEEDBACK_START_CALLBACK,
+  CSAT_FEEDBACK_START_TEXT,
   CSAT_FEEDBACK_PROMPT_TEXT,
   csatFeedbackConversationMutation,
   isAwaitingCsatFeedback,
@@ -108,15 +108,15 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     );
     if (!conversation) return denied("provider_quality_conversation_unresolved");
     let declined = false;
-    if (isAwaitingCsatFeedback(conversation)) {
+    if (conversationCsatFeedback(conversation)?.state === "offered") {
       const current = conversationCsatFeedback(conversation);
       const updated = withCsatFeedback(conversation, {
         offeredAt: current?.offeredAt ?? new Date().toISOString(),
         ratingId: current?.ratingId ?? "",
-        state: "declined"
+        state: "awaiting"
       });
       await input.conversationRepository.saveConversationMutation(
-        csatFeedbackConversationMutation(updated, "quality.feedback.declined", { ratingId: current?.ratingId ?? null })
+        csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId: current?.ratingId ?? null })
       );
       declined = true;
     }
@@ -126,10 +126,10 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
         await (input.answerMaxCallback ?? answerMaxCallback)({
           accessToken,
           callbackId: feedbackDecline.callbackId,
-          message: { text: CSAT_FEEDBACK_NEW_APPEAL_TEXT }
+          message: { text: CSAT_FEEDBACK_START_TEXT }
         });
       } else {
-        await (input.sendVkMessage ?? sendVkMessage)({ accessToken, apiVersion: credential.apiVersion, peerId: feedbackDecline.providerConversationId, text: CSAT_FEEDBACK_NEW_APPEAL_TEXT });
+        await (input.sendVkMessage ?? sendVkMessage)({ accessToken, apiVersion: credential.apiVersion, peerId: feedbackDecline.providerConversationId, text: CSAT_FEEDBACK_START_TEXT });
         const providerUserId = "providerUserId" in feedbackDecline && typeof feedbackDecline.providerUserId === "string"
           ? feedbackDecline.providerUserId
           : "";
@@ -182,7 +182,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
       const updated = withCsatFeedback(conversation, {
         offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
         ratingId,
-        state: "awaiting"
+        state: "offered"
       });
       await input.conversationRepository.saveConversationMutation(
         csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId })
@@ -199,8 +199,8 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
               message: {
                 attachments: [{
                   payload: { buttons: [[{
-                    payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
-                    text: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
+                    payload: CSAT_FEEDBACK_START_CALLBACK,
+                    text: CSAT_FEEDBACK_START_BUTTON_TEXT,
                     type: "callback"
                   }]] },
                   type: "inline_keyboard"
@@ -212,7 +212,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
             answered = await (input.sendVkMessage ?? sendVkMessage)({
               accessToken,
               apiVersion: credential.apiVersion,
-              keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT, payload: JSON.stringify({ callback: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK }), type: "callback" }, color: "primary" }]], inline: true },
+              keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_START_BUTTON_TEXT, payload: JSON.stringify({ callback: CSAT_FEEDBACK_START_CALLBACK }), type: "callback" }, color: "primary" }]], inline: true },
               peerId: rating.providerConversationId,
               text: promptText
             });
@@ -461,7 +461,7 @@ function parseMaxCsatFeedbackDecline(body: Record<string, unknown>): {
 } | null {
   if (value(body.update_type) !== "message_callback") return null;
   const callback = record(body.callback) ?? body;
-  if (value(callback.payload ?? callback.data ?? body.payload) !== CSAT_FEEDBACK_NEW_APPEAL_CALLBACK) return null;
+  if (value(callback.payload ?? callback.data ?? body.payload) !== CSAT_FEEDBACK_START_CALLBACK) return null;
   const message = record(callback.message) ?? record(body.message);
   const recipient = record(message?.recipient);
   const providerConversationId = value(recipient?.chat_id ?? recipient?.user_id ?? callback.chat_id ?? body.chat_id);
@@ -488,7 +488,7 @@ function parseVkCsatFeedbackDecline(body: Record<string, unknown>): { callbackId
   const providerConversationId = value(event.peer_id);
   const providerUserId = value(event.user_id);
   const callbackId = value(event.event_id);
-  return vkCallbackPayload(event.payload) === CSAT_FEEDBACK_NEW_APPEAL_CALLBACK && providerConversationId && callbackId
+  return vkCallbackPayload(event.payload) === CSAT_FEEDBACK_START_CALLBACK && providerConversationId && callbackId
     ? { callbackId, providerConversationId, providerUserId }
     : null;
 }

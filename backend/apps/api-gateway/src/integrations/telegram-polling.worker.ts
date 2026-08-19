@@ -6,7 +6,7 @@ import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } fr
 import type { TelegramHttpFetch } from "./telegram-channel-connection.js";
 import {
   acknowledgeTelegramCsatFeedback,
-  declineTelegramCsatFeedback,
+  startTelegramCsatFeedback,
   offerTelegramCsatFeedbackAfterRating
 } from "./telegram-csat-feedback.js";
 import {
@@ -14,7 +14,7 @@ import {
   requestTelegramPhoneIfMissing
 } from "./telegram-phone-collection.js";
 import {
-  parseTelegramCsatFeedbackDecline,
+  parseTelegramCsatFeedbackStart,
   parseTelegramQualityRating,
   resolveTelegramInboundConversation,
   resolveTelegramRatedTarget,
@@ -226,22 +226,22 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         continue;
       }
 
-      const feedbackDecline = parseTelegramCsatFeedbackDecline(update as unknown as Record<string, unknown>);
-      if (feedbackDecline) {
+      const feedbackStart = parseTelegramCsatFeedbackStart(update as unknown as Record<string, unknown>);
+      if (feedbackStart) {
         // «Новое обращение» под промптом отзыва: снять ожидание и скрыть промпт.
         const target = await resolveTelegramRatedTarget(input.conversationRepository, {
           botId: connection.botId ?? undefined,
-          chatId: feedbackDecline.chatId,
+          chatId: feedbackStart.chatId,
           tenantId: connection.tenantId
         });
         if (target) {
-          await declineTelegramCsatFeedback({
+          await startTelegramCsatFeedback({
             api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
-            callbackQueryId: feedbackDecline.callbackQueryId,
-            chatId: feedbackDecline.chatId,
+            callbackQueryId: feedbackStart.callbackQueryId,
+            chatId: feedbackStart.chatId,
             conversation: target.conversation,
             conversationRepository: input.conversationRepository,
-            promptMessageId: feedbackDecline.messageId
+            promptMessageId: feedbackStart.messageId
           });
           result.accepted += 1;
         } else {

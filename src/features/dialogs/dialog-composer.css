@@ -624,3 +624,78 @@
     width: 100%;
   }
 }
+
+/* В низком desktop-окне сам композер становится компактнее, а его верхняя
+   прокручиваемая зона сохраняет доступ ко всем режимам и вложениям. */
+@media (min-width: 1101px) and (max-height: 800px) {
+  .composer {
+    width: calc(100% - 24px);
+    max-height: min(240px, 30vh);
+    margin: 0 12px 10px;
+  }
+
+  .composer-scroll {
+    min-height: 64px;
+  }
+
+  .composer-tabs {
+    gap: 6px;
+    padding: 7px 10px 6px;
+  }
+
+  .composer-tabs button {
+    height: 28px;
+    padding-inline: 9px;
+    font-size: 12px;
+  }
+
+  .composer-template-picker {
+    gap: 6px;
+    padding: 0 10px 8px;
+  }
+
+  .composer-template-picker button {
+    min-height: 44px;
+    padding: 6px;
+  }
+
+  .inline-ai-panel {
+    gap: 6px;
+    padding: 0 10px 8px;
+  }
+
+  .inline-ai-card {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .composer-draft {
+    margin-inline: 10px;
+  }
+
+  .composer textarea {
+    width: calc(100% - 20px);
+    height: 64px;
+    margin-inline: 10px;
+    padding: 8px;
+  }
+
+  .composer-draft textarea {
+    width: 100%;
+    margin-inline: 0;
+  }
+
+  .attachment-queue {
+    gap: 6px;
+    padding: 8px 10px 0;
+  }
+
+  .composer-footer {
+    padding: 7px 10px 8px;
+  }
+
+  .send-button {
+    min-height: 32px;
+    padding-inline: 12px;
+  }
+}

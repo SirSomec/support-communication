@@ -1467,6 +1467,7 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
     { width: 390, height: 844 },
     { width: 768, height: 900 },
     { width: 1024, height: 900 },
+    { width: 1366, height: 768 },
     { width: 1440, height: 900 }
   ]) {
     await page.setViewportSize(viewport);
@@ -1885,6 +1886,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     { width: 390, height: 844 },
     { width: 768, height: 900 },
     { width: 1024, height: 900 },
+    { width: 1366, height: 768 },
     { width: 1440, height: 900 }
   ]) {
     await page.setViewportSize(viewport);
@@ -1896,6 +1898,43 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
       await expectHealthyPage(page);
     }
   }
+});
+
+test("operator workspace keeps the reply area in view at 1366x768", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await openAppShell(page);
+
+  const cockpit = page.locator(".cockpit");
+  await expect(cockpit).toBeVisible();
+  await expect(cockpit.locator(".chat-pane")).toBeVisible();
+  await expect(cockpit.locator(".composer")).toBeVisible();
+
+  const layout = await cockpit.evaluate((cockpitNode) => {
+    const chatPane = cockpitNode.querySelector(".chat-pane");
+    const composer = cockpitNode.querySelector(".composer");
+    const transcript = cockpitNode.querySelector(".chat-transcript");
+    if (!chatPane || !composer || !transcript) return null;
+
+    const chatRect = chatPane.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    const transcriptRect = transcript.getBoundingClientRect();
+    const cockpitRect = cockpitNode.getBoundingClientRect();
+
+    return {
+      cockpitFitsViewport: cockpitRect.bottom <= window.innerHeight + 1,
+      composerFitsChat: composerRect.top >= chatRect.top - 1 && composerRect.bottom <= chatRect.bottom + 1,
+      composerHeight: composerRect.height,
+      transcriptHeight: transcriptRect.height
+    };
+  });
+
+  expect(layout).not.toBeNull();
+  expect(layout.cockpitFitsViewport).toBeTruthy();
+  expect(layout.composerFitsChat).toBeTruthy();
+  expect(layout.composerHeight).toBeGreaterThanOrEqual(150);
+  expect(layout.transcriptHeight).toBeGreaterThanOrEqual(72);
+  await expectNoElementOverflow(page, ".cockpit");
+  await expectHealthyPage(page);
 });
 
 test("route namespaces keep public auth and service admin isolated", async ({ page }) => {

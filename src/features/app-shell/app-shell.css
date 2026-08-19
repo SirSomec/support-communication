@@ -425,6 +425,61 @@
   white-space: nowrap;
 }
 
+/* На низких десктопных экранах освобождаем рабочую высоту, не уменьшая масштаб
+   интерфейса и не переводя пользователя в мобильную компоновку. */
+@media (min-width: 1101px) and (max-height: 800px) {
+  .workspace {
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding-block: 8px;
+  }
+
+  .sidebar-brand {
+    margin-bottom: 10px;
+  }
+
+  .nav-list {
+    gap: 2px;
+  }
+
+  .nav-item {
+    min-height: 42px;
+    padding-inline: 10px;
+  }
+
+  .sidebar-support-nav {
+    margin-top: 4px;
+    padding-top: 8px;
+  }
+
+  .operator-card {
+    margin-top: 4px;
+    padding-block: 4px;
+  }
+
+  .topbar {
+    padding-inline: 12px;
+  }
+
+  .topbar-left,
+  .topbar-right {
+    gap: 8px;
+  }
+
+  .status-select,
+  .quick-action,
+  .role-switcher {
+    min-height: 34px;
+  }
+
+  .icon-button {
+    width: 34px;
+    height: 34px;
+  }
+}
+
 @media (max-width: 1100px) {
   .topbar {
     flex-wrap: wrap;

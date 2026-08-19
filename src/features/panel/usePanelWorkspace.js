@@ -26,7 +26,8 @@ export function usePanelWorkspace({ channel, presenceDate, presenceVersion = 0, 
   }, [snapshot]);
 
   const presenceRange = useMemo(() => presenceRangeForDate(presenceDate), [presenceDate]);
-  const queryKey = useMemo(() => JSON.stringify({ channel, presenceRange, workloadPeriod }), [channel, presenceRange, workloadPeriod]);
+  const presenceQueryKey = useMemo(() => JSON.stringify(presenceRange), [presenceRange]);
+  const queryKey = useMemo(() => JSON.stringify({ channel, presenceQueryKey, workloadPeriod }), [channel, presenceQueryKey, workloadPeriod]);
   const refresh = useCallback(() => setRefreshKey((current) => current + 1), []);
 
   useEffect(() => {
@@ -40,11 +41,16 @@ export function usePanelWorkspace({ channel, presenceDate, presenceVersion = 0, 
       period: workloadPeriod,
       timezoneOffsetMinutes: -new Date().getTimezoneOffset()
     };
-    const presenceFilters = presenceRange ?? {};
+    const presenceRequest = presenceRange
+      ? presenceService.fetchTeamPresence(presenceRange, { signal: controller.signal })
+      : Promise.resolve({
+        error: { code: "presence_date_invalid", message: "Выберите корректную дату времени в статусах." },
+        status: "error"
+      });
 
     void Promise.all([
       routingService.fetchWorkload(workloadFilters, { signal: controller.signal }),
-      presenceService.fetchTeamPresence(presenceFilters, { signal: controller.signal }),
+      presenceRequest,
       shiftService.fetchCurrent({ signal: controller.signal })
     ]).then(([workloadResponse, presenceResponse, shiftResponse]) => {
       if (controller.signal.aborted) return;
@@ -53,12 +59,14 @@ export function usePanelWorkspace({ channel, presenceDate, presenceVersion = 0, 
       const presenceOk = presenceResponse.status === "ok";
       const shiftOk = shiftResponse.status === "ok";
       const previous = snapshotRef.current;
+      const previousPresence = previous?.presenceKey === presenceQueryKey ? previous.presence ?? null : null;
 
-      if (workloadOk) {
+      if (workloadOk || presenceOk || shiftOk) {
         const nextSnapshot = {
-          presence: presenceOk ? presenceResponse.data ?? null : previous?.presence ?? null,
+          presence: presenceOk ? presenceResponse.data ?? null : previousPresence,
+          presenceKey: presenceQueryKey,
           shift: shiftOk ? shiftResponse.data?.shift ?? null : previous?.shift ?? null,
-          workload: workloadResponse.data ?? null
+          workload: workloadOk ? workloadResponse.data ?? null : previous?.workload ?? null
         };
         setSnapshot(nextSnapshot);
         setReceivedAt(Date.now());
@@ -79,7 +87,7 @@ export function usePanelWorkspace({ channel, presenceDate, presenceVersion = 0, 
     });
 
     return () => controller.abort();
-  }, [presenceVersion, queryKey, refreshKey]);
+  }, [presenceQueryKey, presenceRange, presenceVersion, queryKey, refreshKey]);
 
   useEffect(() => {
     const handleOnline = () => { setOnline(true); refresh(); };
@@ -99,12 +107,14 @@ export function usePanelWorkspace({ channel, presenceDate, presenceVersion = 0, 
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  const presence = snapshot?.presenceKey === presenceQueryKey ? snapshot.presence ?? null : null;
+
   return {
     error: errors.workload,
     errors,
     loading,
     online,
-    presence: snapshot?.presence ?? null,
+    presence,
     receivedAt,
     refresh,
     refreshing,

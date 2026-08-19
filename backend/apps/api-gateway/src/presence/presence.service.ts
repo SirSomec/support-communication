@@ -35,6 +35,11 @@ export interface PresenceServiceOptions {
   autoAssignQueuedConversations?: (tenantId: string) => Promise<void>;
   conversationRepository?: Pick<ConversationRepository, "appendRealtimeEvent">;
   identityRepository?: Pick<IdentityRepositoryPort, "findTenantUsers">;
+  /**
+   * Snapshot clock for presence reporting. Durations in an open interval must
+   * never include time after the report was generated.
+   */
+  now?: () => Date;
   presenceRepository?: OperatorPresenceRepositoryPort;
   realtimeFanout?: RealtimeFanoutAdapter;
 }
@@ -45,6 +50,7 @@ export class OperatorPresenceService {
   private readonly autoAssignQueuedConversations?: (tenantId: string) => Promise<void>;
   private readonly conversationRepository: Pick<ConversationRepository, "appendRealtimeEvent">;
   private readonly identityRepository: Pick<IdentityRepositoryPort, "findTenantUsers">;
+  private readonly now: () => Date;
   private readonly presenceRepository: OperatorPresenceRepositoryPort;
   private readonly realtimeFanout: RealtimeFanoutAdapter;
 
@@ -52,6 +58,7 @@ export class OperatorPresenceService {
     this.autoAssignQueuedConversations = options.autoAssignQueuedConversations;
     this.conversationRepository = options.conversationRepository ?? ConversationRepository.default();
     this.identityRepository = options.identityRepository ?? IdentityRepository.default();
+    this.now = options.now ?? (() => new Date());
     this.presenceRepository = options.presenceRepository ?? OperatorPresenceRepository.default();
     this.realtimeFanout = options.realtimeFanout ?? defaultRealtimeFanout;
   }
@@ -197,9 +204,29 @@ export class OperatorPresenceService {
       return errorEnvelope("fetchTeamPresence", "invalid", "tenant_context_required", "Tenant context is required for team presence reads.", {});
     }
 
-    const range = resolvePresenceRange(filters);
+    const snapshotAt = this.now();
+    const range = resolvePresenceRange(filters, snapshotAt);
     if ("error" in range) {
       return errorEnvelope("fetchTeamPresence", "invalid", "presence_range_invalid", range.error, { from: filters.from ?? null, to: filters.to ?? null });
+    }
+
+    // The Panel sends the end of a selected calendar day as the next local
+    // midnight. For the current day that boundary lies in the future; counting
+    // an open interval through it made today's totals include hours that had
+    // not happened yet. Freeze a single reporting snapshot and use it as the
+    // effective end of all duration calculations.
+    const calculationRange = {
+      from: range.value.from,
+      to: new Date(Math.min(range.value.to.getTime(), snapshotAt.getTime()))
+    };
+    if (calculationRange.from.getTime() > calculationRange.to.getTime()) {
+      return errorEnvelope(
+        "fetchTeamPresence",
+        "invalid",
+        "presence_range_invalid",
+        "Range start must not be in the future.",
+        { from: range.value.from.toISOString(), snapshotAt: snapshotAt.toISOString(), to: range.value.to.toISOString() }
+      );
     }
 
     const [users, currentRecords, intervals] = await Promise.all([
@@ -209,8 +236,8 @@ export class OperatorPresenceService {
     ]);
     const activeUsers = users.filter((user) => user.tenantId === tenantId && user.status === "active");
     const currentByOperator = new Map(currentRecords.map((record) => [record.operatorId, record]));
-    const secondsByOperator = summarizeIntervalSeconds(intervals, range.value);
-    const lineStartedAtByOperator = firstOnlineStartedAt(intervals);
+    const secondsByOperator = summarizeIntervalSeconds(intervals, calculationRange);
+    const lineStartedAtByOperator = firstOnlineStartedAt(intervals, calculationRange);
 
     const operators = activeUsers.map((user) => {
       const current = currentByOperator.get(user.id) ?? null;
@@ -237,10 +264,10 @@ export class OperatorPresenceService {
       data: {
         operators,
         range: {
-          from: range.value.from.toISOString(),
-          to: range.value.to.toISOString()
+          from: calculationRange.from.toISOString(),
+          to: calculationRange.to.toISOString()
         },
-        refreshedAt: new Date().toISOString(),
+        refreshedAt: snapshotAt.toISOString(),
         statuses: OPERATOR_PRESENCE_STATUSES
       }
     });
@@ -323,8 +350,7 @@ function requireOperatorScope(
   return { operatorId, tenantId };
 }
 
-function resolvePresenceRange(filters: { from?: string; to?: string }): { value: { from: Date; to: Date } } | { error: string } {
-  const now = new Date();
+function resolvePresenceRange(filters: { from?: string; to?: string }, now = new Date()): { value: { from: Date; to: Date } } | { error: string } {
   const to = filters.to ? new Date(filters.to) : now;
   const from = filters.from ? new Date(filters.from) : startOfUtcDay(now);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
@@ -364,14 +390,21 @@ function summarizeIntervalSeconds(
  * break, so it must not be reused for this field.
  */
 function firstOnlineStartedAt(
-  intervals: Array<{ operatorId: string; startedAt: string; status: OperatorPresenceStatus }>
+  intervals: Array<{ endedAt: string | null; operatorId: string; startedAt: string; status: OperatorPresenceStatus }>,
+  range: { from: Date; to: Date }
 ): Map<string, string> {
   const result = new Map<string, string>();
+  if (range.to.getTime() <= range.from.getTime()) return result;
+
   for (const interval of intervals) {
     if (interval.status !== "online") continue;
+    const startedAtMs = new Date(interval.startedAt).getTime();
+    const endedAtMs = interval.endedAt ? new Date(interval.endedAt).getTime() : Number.POSITIVE_INFINITY;
+    if (startedAtMs >= range.to.getTime() || endedAtMs <= range.from.getTime()) continue;
+    const visibleStartedAt = new Date(Math.max(startedAtMs, range.from.getTime())).toISOString();
     const current = result.get(interval.operatorId);
-    if (!current || interval.startedAt < current) {
-      result.set(interval.operatorId, interval.startedAt);
+    if (!current || visibleStartedAt < current) {
+      result.set(interval.operatorId, visibleStartedAt);
     }
   }
   return result;

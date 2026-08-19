@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   PANEL_WORKLOAD_PERIODS,
   createShiftDraft,
+  formatPanelDate,
+  isSelectablePresenceDate,
   presenceRangeForDate,
   resolveShiftSummary,
   workloadPeriodLabel
@@ -19,13 +21,27 @@ describe("shift panel model", () => {
     assert.equal(from.getMinutes(), 0);
     assert.equal(to.getHours(), 0);
     assert.equal(to.getMinutes(), 0);
-    assert.equal(to.getTime() - from.getTime(), 24 * 60 * 60 * 1_000);
+    assert.equal(from.getFullYear(), 2026);
+    assert.equal(from.getMonth(), 7);
+    assert.equal(from.getDate(), 20);
+    assert.equal(to.getFullYear(), 2026);
+    assert.equal(to.getMonth(), 7);
+    assert.equal(to.getDate(), 21);
   });
 
   it("rejects malformed and impossible status dates", () => {
     assert.equal(presenceRangeForDate("2026-02-31"), null);
     assert.equal(presenceRangeForDate("20.08.2026"), null);
     assert.equal(presenceRangeForDate(""), null);
+  });
+
+  it("treats a date-only value as a calendar day and disallows future status dates", () => {
+    assert.equal(formatPanelDate("2026-08-20", { timeZone: "America/Los_Angeles" }), "20 августа 2026 г.");
+    const now = new Date("2026-08-20T12:00:00");
+    assert.equal(isSelectablePresenceDate("2026-08-19", now), true);
+    assert.equal(isSelectablePresenceDate("2026-08-20", now), true);
+    assert.equal(isSelectablePresenceDate("2026-08-21", now), false);
+    assert.equal(isSelectablePresenceDate("", now), false);
   });
 
   it("counts only explicitly configured shift members", () => {

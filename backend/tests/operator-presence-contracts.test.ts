@@ -360,6 +360,133 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       assert.equal(invalidRange.status, "invalid");
       assert.equal(invalidRange.error?.code, "presence_range_invalid");
     });
+
+    it("does not count an open status beyond the reporting snapshot", async () => {
+      const presenceRepository = OperatorPresenceRepository.inMemory();
+      await presenceRepository.setStatus({
+        at: new Date("2026-07-13T08:00:00.000Z"),
+        operatorId: "operator-anna",
+        status: "online",
+        tenantId: TENANT
+      });
+      await presenceRepository.setStatus({
+        at: new Date("2026-07-13T10:00:00.000Z"),
+        operatorId: "operator-anna",
+        status: "busy",
+        tenantId: TENANT
+      });
+
+      const snapshotAt = new Date("2026-07-13T12:00:00.000Z");
+      const service = new OperatorPresenceService({
+        conversationRepository: createRealtimeSinks().conversationRepository,
+        identityRepository: createIdentityStub([{ id: "operator-anna", name: "Anna R." }]),
+        now: () => snapshotAt,
+        presenceRepository,
+        realtimeFanout: createRealtimeSinks().realtimeFanout
+      });
+
+      // The Panel sends the next midnight as the end of a calendar day. At
+      // noon, only four hours of the day have elapsed and the open "busy"
+      // interval must not be extended through the remaining twelve hours.
+      const envelope = await service.fetchTeamPresence({
+        from: "2026-07-13T00:00:00.000Z",
+        to: "2026-07-14T00:00:00.000Z"
+      }, operatorContext("operator-anna"));
+
+      assert.equal(envelope.status, "ok");
+      const anna = (envelope.data.operators as Array<Record<string, unknown>>)[0] as {
+        seconds: Record<string, number>;
+        trackedSeconds: number;
+      };
+      assert.equal(anna.seconds.online, 7_200);
+      assert.equal(anna.seconds.busy, 7_200);
+      assert.equal(anna.trackedSeconds, 14_400);
+      assert.equal(envelope.data.refreshedAt, snapshotAt.toISOString());
+      assert.equal((envelope.data.range as { to: string }).to, snapshotAt.toISOString());
+    });
+
+    it("uses one reporting snapshot for the default status window", async () => {
+      const presenceRepository = OperatorPresenceRepository.inMemory();
+      await presenceRepository.setStatus({
+        at: new Date("2026-07-13T08:00:00.000Z"),
+        operatorId: "operator-anna",
+        status: "online",
+        tenantId: TENANT
+      });
+
+      const snapshotAt = new Date("2026-07-13T12:00:00.000Z");
+      const service = new OperatorPresenceService({
+        conversationRepository: createRealtimeSinks().conversationRepository,
+        identityRepository: createIdentityStub([{ id: "operator-anna", name: "Anna R." }]),
+        now: () => snapshotAt,
+        presenceRepository,
+        realtimeFanout: createRealtimeSinks().realtimeFanout
+      });
+
+      const envelope = await service.fetchTeamPresence({}, operatorContext("operator-anna"));
+
+      assert.equal(envelope.status, "ok");
+      const anna = (envelope.data.operators as Array<Record<string, unknown>>)[0] as {
+        seconds: Record<string, number>;
+        trackedSeconds: number;
+      };
+      assert.equal(anna.seconds.online, 14_400);
+      assert.equal(anna.trackedSeconds, 14_400);
+      assert.deepEqual(envelope.data.range, {
+        from: "2026-07-13T00:00:00.000Z",
+        to: snapshotAt.toISOString()
+      });
+      assert.equal(envelope.data.refreshedAt, snapshotAt.toISOString());
+    });
+
+    it("clips an overnight line entry to the selected reporting window", async () => {
+      const presenceRepository = OperatorPresenceRepository.inMemory();
+      await presenceRepository.setStatus({
+        at: new Date("2026-07-12T23:45:00.000Z"),
+        operatorId: "operator-anna",
+        status: "online",
+        tenantId: TENANT
+      });
+
+      const service = new OperatorPresenceService({
+        conversationRepository: createRealtimeSinks().conversationRepository,
+        identityRepository: createIdentityStub([{ id: "operator-anna", name: "Anna R." }]),
+        now: () => new Date("2026-07-13T02:00:00.000Z"),
+        presenceRepository,
+        realtimeFanout: createRealtimeSinks().realtimeFanout
+      });
+
+      const envelope = await service.fetchTeamPresence({
+        from: "2026-07-13T00:00:00.000Z",
+        to: "2026-07-14T00:00:00.000Z"
+      }, operatorContext("operator-anna"));
+
+      assert.equal(envelope.status, "ok");
+      const anna = (envelope.data.operators as Array<Record<string, unknown>>)[0] as {
+        lineStartedAt: string;
+        seconds: Record<string, number>;
+      };
+      assert.equal(anna.lineStartedAt, "2026-07-13T00:00:00.000Z");
+      assert.equal(anna.seconds.online, 7_200);
+    });
+
+    it("rejects report windows that have not started yet", async () => {
+      const service = new OperatorPresenceService({
+        conversationRepository: createRealtimeSinks().conversationRepository,
+        identityRepository: createIdentityStub([]),
+        now: () => new Date("2026-07-13T12:00:00.000Z"),
+        presenceRepository: OperatorPresenceRepository.inMemory(),
+        realtimeFanout: createRealtimeSinks().realtimeFanout
+      });
+
+      const envelope = await service.fetchTeamPresence({
+        from: "2026-07-14T00:00:00.000Z",
+        to: "2026-07-15T00:00:00.000Z"
+      }, operatorContext("operator-anna"));
+
+      assert.equal(envelope.status, "invalid");
+      assert.equal(envelope.error?.code, "presence_range_invalid");
+    });
   });
 
   describe("routing distribution honors operator presence", () => {

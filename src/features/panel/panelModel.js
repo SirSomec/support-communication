@@ -15,39 +15,40 @@ export function currentLocalDateValue(now = new Date()) {
 }
 
 export function presenceRangeForDate(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
-  if (!match) {
-    return null;
-  }
+  const calendarDate = parseCalendarDate(value);
+  if (!calendarDate) return null;
 
-  const [, rawYear, rawMonth, rawDay] = match;
-  const year = Number(rawYear);
-  const month = Number(rawMonth);
-  const day = Number(rawDay);
-
-  const from = new Date(year, month - 1, day);
-  const to = new Date(year, month - 1, day + 1);
-  if (
-    Number.isNaN(from.getTime())
-    || Number.isNaN(to.getTime())
-    || from.getFullYear() !== year
-    || from.getMonth() !== month - 1
-    || from.getDate() !== day
-  ) {
-    return null;
-  }
+  const from = new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day);
+  const to = new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day + 1);
 
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
+export function isSelectablePresenceDate(value, now = new Date()) {
+  const calendarDate = parseCalendarDate(value);
+  if (!calendarDate) return false;
+
+  const candidate = new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return candidate.getTime() <= today.getTime();
+}
+
 export function formatPanelDate(value, options = {}) {
-  const date = toDate(value);
+  const calendarDate = parseCalendarDate(value);
+  const date = calendarDate
+    ? new Date(Date.UTC(calendarDate.year, calendarDate.month - 1, calendarDate.day))
+    : toDate(value);
   if (!date) return "—";
+  const { withYear = true, ...formatterOptions } = options;
   return new Intl.DateTimeFormat("ru-RU", {
     day: "numeric",
     month: "long",
-    year: options.withYear === false ? undefined : "numeric",
-    ...options
+    year: withYear === false ? undefined : "numeric",
+    ...formatterOptions,
+    // A YYYY-MM-DD value is a calendar date, not a UTC instant. Pin its
+    // formatter to UTC so a west-of-UTC browser never renders the previous day.
+    ...(calendarDate ? { timeZone: "UTC" } : {})
   }).format(date);
 }
 
@@ -146,6 +147,29 @@ export function shiftTimeLabel(shift) {
 export function dateValue(date) {
   const pad = (part) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function parseCalendarDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
+  if (!match) return null;
+
+  const [, rawYear, rawMonth, rawDay] = match;
+  const year = Number(rawYear);
+  const month = Number(rawMonth);
+  const day = Number(rawDay);
+  if (year < 1) return null;
+
+  const verificationDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(verificationDate.getTime())
+    || verificationDate.getUTCFullYear() !== year
+    || verificationDate.getUTCMonth() !== month - 1
+    || verificationDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return { day, month, year };
 }
 
 function toDate(value) {

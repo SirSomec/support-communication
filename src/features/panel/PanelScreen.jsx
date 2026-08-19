@@ -30,6 +30,7 @@ import {
   formatPanelDateTime,
   formatPanelTime,
   formatRefreshTime,
+  isSelectablePresenceDate,
   resolveShiftSummary,
   shiftTimeLabel,
   workloadPeriodLabel
@@ -47,6 +48,7 @@ export function PanelScreen({ onBack, onToast, access = {}, navigationTarget = n
   const [redistributionHelpOpen, setRedistributionHelpOpen] = useState(false);
   const [shiftManagerOpen, setShiftManagerOpen] = useState(false);
   const workspace = usePanelWorkspace({ channel, presenceDate, presenceVersion, workloadPeriod });
+  const todayPresenceDate = currentLocalDateValue(new Date(nowMs));
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 10_000);
@@ -132,6 +134,16 @@ export function PanelScreen({ onBack, onToast, access = {}, navigationTarget = n
   function closeRedistributionPreview() {
     setRedistributionPreview(null);
     setRedistributionPayload(null);
+  }
+
+  function changePresenceDate(value) {
+    if (isSelectablePresenceDate(value, new Date(nowMs))) {
+      setPresenceDate(value);
+      return;
+    }
+    if (!value) {
+      setPresenceDate(todayPresenceDate);
+    }
   }
 
   if (workspace.loading && !workspace.workload) {
@@ -358,17 +370,19 @@ export function PanelScreen({ onBack, onToast, access = {}, navigationTarget = n
         <header className="panel-section-header presence-section-header">
           <div>
             <h2>Время в статусах</h2>
-            <p>Интервалы за {formatPanelDate(presenceDate)}. Колонка «На линии с» показывает первое появление онлайн за эту дату.</p>
+            <p>Интервалы за {formatPanelDate(presenceDate)}{presenceDate === todayPresenceDate ? " по текущий момент" : ""}. Колонка «На линии с» показывает первое появление онлайн за эту дату.</p>
           </div>
           <div className="presence-date-controls">
             <label>
               <CalendarDays aria-hidden="true" size={16} />
-              <input aria-label="Дата времени в статусах" onChange={(event) => setPresenceDate(event.target.value)} type="date" value={presenceDate} />
+              <input aria-label="Дата времени в статусах" max={todayPresenceDate} onChange={(event) => changePresenceDate(event.target.value)} type="date" value={presenceDate} />
             </label>
-            <button disabled={presenceDate === currentLocalDateValue()} onClick={() => setPresenceDate(currentLocalDateValue())} type="button">Сегодня</button>
+            <button disabled={presenceDate === todayPresenceDate} onClick={() => setPresenceDate(todayPresenceDate)} type="button">Сегодня</button>
           </div>
         </header>
-        {!workspace.presence ? (
+        {workspace.errors.presence ? (
+          <WorkspaceState actionLabel="Повторить" description={workspace.errors.presence} onAction={workspace.refresh} title="Не удалось обновить время в статусах" tone="error" />
+        ) : !workspace.presence ? (
           <div className="panel-empty-row">Статусы команды ещё загружаются.</div>
         ) : !displayPresenceOperators.length ? (
           <ScreenStateStrip items={[{ label: "Статусы", tone: "empty", value: "За эту дату нет зафиксированных статусов" }]} />
@@ -393,9 +407,10 @@ export function PanelScreen({ onBack, onToast, access = {}, navigationTarget = n
                   </span>
                   <span className="presence-line-entry" role="cell" title={row.lineStartedAt ? formatPanelDateTime(row.lineStartedAt) : "Выход на линию не зафиксирован"}>{formatLineEntry(row.lineStartedAt, presenceDate)}</span>
                   {PRESENCE_STATUSES.map((status) => {
-                    const seconds = row.seconds?.[status.key] ?? 0;
+                    const seconds = Number(row.seconds?.[status.key] ?? 0);
                     const isCurrent = row.status === status.key;
-                    return <span className={isCurrent ? "presence-summary-current" : ""} key={status.key} role="cell">{seconds > 0 ? formatPresenceSeconds(seconds) : "—"}</span>;
+                    const hasDuration = Number.isFinite(seconds) && seconds > 0;
+                    return <span className={isCurrent ? "presence-summary-current" : ""} key={status.key} role="cell">{hasDuration || isCurrent ? formatPresenceSeconds(Math.max(0, seconds)) : "—"}</span>;
                   })}
                 </div>
               ))}

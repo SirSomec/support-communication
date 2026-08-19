@@ -728,7 +728,9 @@ test("conversation queue derives activity time and order from timestamps @releas
 
   const activityTimes = await queueRows.locator(".queue-title time").allTextContents();
   expect(activityTimes[0]).toBe("Сейчас");
-  expect(activityTimes[1]).toMatch(/^\d{2}:\d{2}$/);
+  // A timestamp within the current minute is intentionally rendered as
+  // «Сейчас»; the browser clock and the fixture clock can straddle that edge.
+  expect(activityTimes[1]).toMatch(/^(Сейчас|\d{2}:\d{2})$/);
   expect(activityTimes[2]).toMatch(/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/);
 
   await queueRows.nth(1).click();

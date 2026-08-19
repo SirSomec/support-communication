@@ -89,7 +89,7 @@ export async function startTelegramCsatFeedback(input: {
   conversation: ConversationRecord;
   conversationRepository: CsatConversationStore;
   promptMessageId?: string;
-}): Promise<{ declined: boolean }> {
+}): Promise<{ started: boolean }> {
   const conversation = input.conversation;
   let started = false;
   if (conversationCsatFeedback(conversation)?.state === "offered") {

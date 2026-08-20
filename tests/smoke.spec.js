@@ -450,6 +450,10 @@ test("reports workspace exposes accessible KPI, trend, filter and export control
   await incomingDefinition.hover();
   const metricTooltip = page.getByRole("tooltip");
   await expect(metricTooltip).toContainText("Входящие обращения");
+  await expect(metricTooltip).toContainText("Уникальные обращения с известным временем создания");
+  await expect(metricTooltip).toContainText("Источник");
+  await expect(metricTooltip).toContainText("Время создания обращения");
+  await expect(metricTooltip).toContainText("Строки без корректного времени создания исключаются");
   await page.getByRole("heading", { name: "Отчеты" }).hover();
   await expect(metricTooltip).toHaveCount(0);
   await incomingDefinition.click();

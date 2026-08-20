@@ -49,6 +49,16 @@ describe("support operations workspace v2 contracts", () => {
     const metricKeys = Object.keys(workspace.metrics.current).sort();
     assert.deepEqual(workspace.metricDefinitions.map((definition) => definition.key).sort(), metricKeys);
     assert.equal(workspace.metricDefinitions.every((definition) => definition.formula.length > 0 && definition.source.length > 0), true);
+
+    const definitionText = workspace.metricDefinitions.flatMap((definition) => [definition.formula, ...definition.source, ...definition.caveats]);
+    assert.equal(definitionText.every((text) => /[А-Яа-яЁё]/.test(text) && !/[a-z]/.test(text)), true);
+    assert.deepEqual(workspace.metricDefinitions.find((definition) => definition.key === "incoming"), {
+      key: "incoming",
+      unit: "count",
+      formula: "Уникальные обращения с известным временем создания, попавшим в выбранный период.",
+      source: ["Время создания обращения", "Событие создания обращения"],
+      caveats: ["Строки без корректного времени создания исключаются."]
+    });
   });
 
   it("calculates the full support KPI set and excludes bot, event and internal messages from human responses", () => {

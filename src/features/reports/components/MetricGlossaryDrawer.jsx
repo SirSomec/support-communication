@@ -19,7 +19,7 @@ export function MetricGlossaryDrawer({ dataQuality, definitions, onClose, source
             <dl>
               <div><dt>Зафиксирован</dt><dd>{formatTimestamp(snapshotAt)}</dd></div>
               <div><dt>Строк источника</dt><dd>{known(sourceDiagnostics.rowCount)}</dd></div>
-              <div><dt>С lifecycle-событиями</dt><dd>{known(sourceDiagnostics.rowsWithLifecycleEvents)}</dd></div>
+              <div><dt>С событиями жизненного цикла</dt><dd>{known(sourceDiagnostics.rowsWithLifecycleEvents)}</dd></div>
               <div><dt>С известным стартом</dt><dd>{known(sourceDiagnostics.conversationsWithKnownStart)}</dd></div>
               <div><dt>Некорректные оценки</dt><dd>{known(sourceDiagnostics.invalidRatings)}</dd></div>
             </dl>

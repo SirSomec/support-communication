@@ -25,7 +25,7 @@ export const REPORT_METRIC_REGISTRY = Object.freeze({
   csatScaleMaximum: { label: "Максимум шкалы CSAT", direction: "neutral", format: "integer" },
   reopenRate: { label: "Переоткрытия", direction: "down", format: "percent" },
   reopenedConversations: { label: "Повторно открытые обращения", direction: "down", format: "integer" },
-  oneTouchRate: { label: "One-touch resolution", direction: "up", format: "percent" },
+  oneTouchRate: { label: "Решено с одного касания", direction: "up", format: "percent" },
   oneTouchResolutionCount: { label: "Решения за одно касание", direction: "up", format: "integer" },
   oneTouchResolutionSamples: { label: "Выборка решений за одно касание", direction: "neutral", format: "integer" },
   responseCoverage: { label: "Покрытие первым ответом", direction: "up", format: "percent" },

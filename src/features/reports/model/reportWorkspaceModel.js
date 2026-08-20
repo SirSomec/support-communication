@@ -75,7 +75,7 @@ const TREND_PRESET_DETAILS = Object.freeze({
   responseCoverage: singleTrend("Покрытие первым ответом", "Доля входящих обращений с измеримым первым ответом", "responseCoverage", "percent", "#0f8f87"),
   csatCoverage: singleTrend("Покрытие CSAT", "Доля решённых обращений с валидной оценкой", "csatCoverage", "percent", "#7a5af8"),
   reopenRate: singleTrend("Переоткрытия", "Доля решённых обращений, открытых повторно", "reopenRate", "percent", "#d66a3a"),
-  oneTouchRate: singleTrend("One-touch resolution", "Доля решений за одно касание оператора", "oneTouchRate", "percent", "#12aaa0"),
+  oneTouchRate: singleTrend("Решено с одного касания", "Доля решений за одно касание оператора", "oneTouchRate", "percent", "#12aaa0"),
   workload: {
     chartType: "bar",
     description: "Публичные касания операторов и внутренние комментарии за период",

@@ -27,7 +27,7 @@ export const REPORT_TREND_METRIC_OPTIONS = Object.freeze([
   { label: "Покрытие CSAT", value: "csatCoverage" },
   { label: "Покрытие первым ответом", value: "responseCoverage" },
   { label: "Переоткрытия", value: "reopenRate" },
-  { label: "One-touch resolution", value: "oneTouchRate" },
+  { label: "Решено с одного касания", value: "oneTouchRate" },
   { label: "Нагрузка команды", value: "workload" }
 ]);
 

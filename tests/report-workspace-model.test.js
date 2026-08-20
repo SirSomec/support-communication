@@ -261,6 +261,7 @@ describe("support-ops/v2 workspace normalization", () => {
       "oneTouchRate",
       "workload"
     ]);
+    assert.equal(explorer.metricOptions.find(({ key }) => key === "oneTouchRate")?.label, "Решено с одного касания");
 
     const responseTrend = selectTrendExplorerView(explorer, { grain: "day", metric: "firstResponse" });
     assert.equal(responseTrend.title, "Время первого ответа");

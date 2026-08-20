@@ -33,6 +33,12 @@ describe("current-query routing breakdown consistency", () => {
     assert.equal(rows[0].backlog, 2);
     assert.equal(rows[0].touches, 7);
     assert.equal(rows.find((row) => row.id === "operator-outside-slice")?.transfers, 11);
+    assert.equal(rows.find((row) => row.id === "operator-outside-slice")?.label, "Иван Петров");
+  });
+
+  it("explains that AI-bot messages are not attributed to employee workload", () => {
+    assert.match(breakdownSource, /AI-бот не считается сотрудником/);
+    assert.match(breakdownSource, /Как учитывается AI-бот в нагрузке команды/);
   });
 
   it("uses operatorId before legacy key/id and merges routing evidence only by the exact canonical id", () => {

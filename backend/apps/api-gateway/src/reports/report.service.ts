@@ -252,7 +252,7 @@ export class ReportService {
       to: to.getTime()
     }));
     const aggregates = aggregateRoutingActivityByOperator(rows, operatorId);
-    const operatorAvatars = await this.operatorAvatarUrls(tenantId);
+    const operatorDirectory = await this.operatorDirectory(tenantId);
 
     return createEnvelope({
       service: REPORT_SERVICE,
@@ -278,7 +278,7 @@ export class ReportService {
         },
         hasActivity: rows.length > 0,
         periodLabel: workspace.periodLabel,
-        rows: withOperatorAvatarUrls(aggregates.rows, operatorAvatars),
+        rows: withOperatorDirectory(aggregates.rows, operatorDirectory),
         source: "routing_analytics_rows",
         totals: {
           assignments: rows.filter((row) => row.eventKind === "assignment").length,
@@ -320,9 +320,9 @@ export class ReportService {
       );
     }
     const liveWorkspace = reportSource.workspace;
-    const operations = withSupportOperationsOperatorAvatars(
+    const operations = withSupportOperationsOperatorDirectory(
       reportSource.operations,
-      await this.operatorAvatarUrls(tenantId)
+      await this.operatorDirectory(tenantId)
     );
     const hasConversationActivity = liveWorkspace.current.newConversations > 0
       || liveWorkspace.previous.newConversations > 0
@@ -392,16 +392,22 @@ export class ReportService {
     });
   }
 
-  private async operatorAvatarUrls(tenantId: string): Promise<Map<string, string>> {
+  private async operatorDirectory(tenantId: string): Promise<Map<string, ReportOperatorDirectoryEntry>> {
     try {
       const users = await this.identityRepository.findTenantUsers(tenantId);
-      const urls = new Map<string, string>();
+      const directory = new Map<string, ReportOperatorDirectoryEntry>();
       for (const user of users) {
         if (user.tenantId !== tenantId) continue;
         const avatar = operatorAvatarUrlFromMetadata(user.metadata);
-        if (avatar) urls.set(user.id, avatar);
+        const name = user.name.trim();
+        if (avatar || name) {
+          directory.set(user.id, {
+            ...(avatar ? { avatar } : {}),
+            ...(name ? { name } : {})
+          });
+        }
       }
-      return urls;
+      return directory;
     } catch {
       // Reporting must remain available when the adjacent identity projection is unavailable.
       return new Map();
@@ -1762,30 +1768,47 @@ function aggregateRoutingActivityByOperator(rows: RoutingActivityReportSourceRow
   };
 }
 
-function withSupportOperationsOperatorAvatars(
+interface ReportOperatorDirectoryEntry {
+  avatar?: string;
+  name?: string;
+}
+
+function withSupportOperationsOperatorDirectory(
   workspace: SupportOperationsWorkspace,
-  avatarUrls: ReadonlyMap<string, string>
+  operatorDirectory: ReadonlyMap<string, ReportOperatorDirectoryEntry>
 ): SupportOperationsWorkspace {
-  if (!avatarUrls.size) return workspace;
+  if (!operatorDirectory.size) return workspace;
   return {
     ...workspace,
     breakdowns: {
       ...workspace.breakdowns,
       operators: workspace.breakdowns.operators.map((operator) => {
-        const avatar = operator.operatorId ? avatarUrls.get(operator.operatorId) : undefined;
-        return avatar ? { ...operator, avatar } : operator;
+        const profile = operator.operatorId ? operatorDirectory.get(operator.operatorId) : undefined;
+        if (!profile) return operator;
+        const name = operator.identityStatus === "id_only" ? profile.name : undefined;
+        if (!profile.avatar && !name) return operator;
+        return {
+          ...operator,
+          ...(profile.avatar ? { avatar: profile.avatar } : {}),
+          ...(name ? { identityStatus: "resolved" as const, label: name } : {})
+        };
       })
     }
   };
 }
 
-function withOperatorAvatarUrls<Row extends { operatorId: string }>(
+function withOperatorDirectory<Row extends { operatorId: string }>(
   rows: readonly Row[],
-  avatarUrls: ReadonlyMap<string, string>
-): Array<Row & { avatar?: string }> {
+  operatorDirectory: ReadonlyMap<string, ReportOperatorDirectoryEntry>
+): Array<Row & { avatar?: string; operatorName?: string }> {
   return rows.map((row) => {
-    const avatar = avatarUrls.get(row.operatorId);
-    return avatar ? { ...row, avatar } : row;
+    const profile = operatorDirectory.get(row.operatorId);
+    if (!profile) return row;
+    return {
+      ...row,
+      ...(profile.avatar ? { avatar: profile.avatar } : {}),
+      ...(profile.name ? { operatorName: profile.name } : {})
+    };
   });
 }
 

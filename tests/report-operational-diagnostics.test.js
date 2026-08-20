@@ -6,6 +6,7 @@ const componentUrl = new URL("../src/features/reports/components/OperationalDiag
 const reportsScreenSource = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
 const reportsCssSource = readFileSync(new URL("../src/features/reports/reports.css", import.meta.url), "utf8");
 const metricRegistrySource = readFileSync(new URL("../src/features/reports/model/reportMetricRegistry.js", import.meta.url), "utf8");
+const tooltipUrl = new URL("../src/features/reports/components/ReportInfoTooltip.jsx", import.meta.url);
 
 describe("reports operational diagnostics contracts", () => {
   it("composes a dedicated operational diagnostics section in the report workspace", () => {
@@ -77,6 +78,20 @@ describe("reports operational diagnostics contracts", () => {
       assert.match(reportsCssSource, new RegExp(`\\.${className}\\b`));
     }
     assert.match(reportsCssSource, /@media\s*\(max-width:[^)]+\)[\s\S]*?\.reports-diagnostic-groups\b/);
+  });
+
+  it("uses a shared interactive tooltip for metric definitions", () => {
+    const componentSource = readFileSync(componentUrl, "utf8");
+    const tooltipSource = readFileSync(tooltipUrl, "utf8");
+    const kpiSource = readFileSync(new URL("../src/features/reports/components/KpiOverview.jsx", import.meta.url), "utf8");
+
+    assert.equal(existsSync(tooltipUrl), true);
+    assert.match(componentSource, /<ReportInfoTooltip/);
+    assert.match(kpiSource, /<ReportInfoTooltip/);
+    assert.match(tooltipSource, /role="tooltip"/);
+    assert.match(tooltipSource, /onPointerEnter/);
+    assert.match(tooltipSource, /onClick=/);
+    assert.match(tooltipSource, /event\.key !== "Escape"/);
   });
 });
 

@@ -101,10 +101,11 @@ describe("support operations report service integration", () => {
     });
   });
 
-  it("adds a resolved tenant operator avatar to operational workload records", async () => {
+  it("resolves an id-only workload record with the tenant employee directory", async () => {
     const repository = ReportRepository.inMemory();
     repository.listSupportOperationsSourceRowsAsync = async () => [
       row("avatar", "2026-08-18T08:00:00.000Z", "2026-08-18T08:05:00.000Z", {
+        operatorName: "operator-1",
         messages: [message("avatar-agent", "2026-08-18T08:01:00.000Z", "agent")]
       })
     ];
@@ -135,6 +136,8 @@ describe("support operations report service integration", () => {
 
     assert.equal(response.status, "ok");
     assert.equal(operator?.avatar, "/avatars/operator-18.png");
+    assert.equal(operator?.identityStatus, "resolved");
+    assert.equal(operator?.label, "Alex");
   });
 
   it("honors persisted resolution outcomes and historical operator participation after reassignment", async () => {

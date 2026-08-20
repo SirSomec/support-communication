@@ -444,6 +444,23 @@ test("reports workspace exposes accessible KPI, trend, filter and export control
   );
   expect(new Set(operatorIds).size).toBe(operatorIds.length);
   await expect(operatorTable.getByRole("rowheader", { name: /^(Operator|Оператор)$/ })).toHaveCount(0);
+  await expect(page.getByText("Назначения, открытая работа и передачи; AI-бот не входит в показатели сотрудников")).toBeVisible();
+
+  const incomingDefinition = page.getByRole("button", { name: "Определение: Входящие обращения" });
+  await incomingDefinition.hover();
+  const metricTooltip = page.getByRole("tooltip");
+  await expect(metricTooltip).toContainText("Входящие обращения");
+  await page.getByRole("heading", { name: "Отчеты" }).hover();
+  await expect(metricTooltip).toHaveCount(0);
+  await incomingDefinition.click();
+  await expect(metricTooltip).toContainText("Входящие обращения");
+  await page.keyboard.press("Escape");
+  await expect(metricTooltip).toHaveCount(0);
+
+  const aiBotInfo = page.getByRole("button", { name: "Как учитывается AI-бот в нагрузке команды" });
+  await aiBotInfo.click();
+  await expect(metricTooltip).toContainText("AI-бот не считается сотрудником");
+  await page.keyboard.press("Escape");
 
   const period = page.getByLabel("Период отчета");
   await period.focus();

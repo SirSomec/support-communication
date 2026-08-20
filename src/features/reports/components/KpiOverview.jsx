@@ -1,7 +1,8 @@
 import React from "react";
-import { ArrowDownRight, ArrowUpRight, Info } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { formatMetricDelta, formatReportMetric, metricLabel, metricTone } from "../model/reportMetricRegistry.js";
 import { HERO_METRIC_KEYS } from "../model/reportWorkspaceModel.js";
+import { ReportInfoTooltip } from "./ReportInfoTooltip.jsx";
 
 export function KpiOverview({ compare, definitions, metrics }) {
   const definitionMap = new Map((definitions ?? []).map((definition) => [definition.key, definition]));
@@ -16,7 +17,7 @@ export function KpiOverview({ compare, definitions, metrics }) {
           <article className={`reports-kpi-card is-${tone} ${metric.value === null || metric.value === undefined ? "is-unavailable" : ""}`} key={metric.key}>
             <header>
               <span>{metricLabel(metric, metric.key)}</span>
-              {definition ? <button aria-label={`Определение: ${metricLabel(metric, metric.key)}`} title={`${definition.formula ?? ""}${definition.source ? ` · Источник: ${definition.source}` : ""}`} type="button"><Info size={14} /></button> : null}
+              {definition ? <ReportInfoTooltip caveats={definition.caveats} description={definition.formula} sources={definition.source} title={metricLabel(metric, metric.key)} /> : null}
             </header>
             <strong>{formatReportMetric(metric, metric.key)}</strong>
             <div>

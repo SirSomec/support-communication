@@ -3,6 +3,7 @@ import { ArrowDownUp, Headphones, Layers3 } from "lucide-react";
 import { mergeReportOperatorRows } from "../model/reportBreakdownModel.js";
 import { formatCompactNumber, formatDurationSeconds, formatNumber } from "../model/reportMetricRegistry.js";
 import { OperatorAvatar } from "../../operators/OperatorAvatar.jsx";
+import { ReportInfoTooltip } from "./ReportInfoTooltip.jsx";
 
 const MIX_VIEWS = [
   { key: "channels", label: "Каналы" },
@@ -52,7 +53,17 @@ export function BreakdownTables({ breakdowns, operatorId, routing }) {
       <article className="reports-panel reports-operator-panel" data-testid="routing-activity-report">
         <header className="reports-panel-heading">
           <span className="reports-panel-icon is-teal"><Headphones aria-hidden="true" size={18} /></span>
-          <span><h2>Нагрузка команды</h2><p>Назначения, открытая работа и передачи — не рейтинг качества</p></span>
+          <span>
+            <span className="reports-heading-with-info">
+              <h2>Нагрузка команды</h2>
+              <ReportInfoTooltip
+                ariaLabel="Как учитывается AI-бот в нагрузке команды"
+                description="AI-бот не считается сотрудником: его сообщения не входят в «Касания» и «Первый ответ». В таблице отображается только операционная нагрузка сотрудников."
+                title="AI-бот в нагрузке команды"
+              />
+            </span>
+            <p>Назначения, открытая работа и передачи; AI-бот не входит в показатели сотрудников</p>
+          </span>
           {routing?.loading ? <span className="reports-subtle-status">Обновляем…</span> : null}
         </header>
         {routing?.error ? <p className="reports-inline-warning">Назначения и передачи временно недоступны: {routing.error}</p> : null}

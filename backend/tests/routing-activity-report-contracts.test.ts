@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { IdentityTenantUser } from "../apps/api-gateway/src/identity/identity.types.ts";
 import {
   ReportRepository,
   type PrismaReportClient,
@@ -152,6 +153,34 @@ describe("routing activity report contracts", () => {
       ],
       tenantId: "tenant-volga"
     });
+  });
+
+  it("enriches routing-only rows with tenant employee names while leaving unknown ids untouched", async () => {
+    const repository = ReportRepository.prisma({
+      client: prismaClientWithRoutingRows([
+        routingRow("assignment-known", "tenant-volga", "assignment", "2026-07-10T08:00:00.000Z", {
+          toOperatorId: "operator-a"
+        }),
+        routingRow("assignment-unknown", "tenant-volga", "assignment", "2026-07-10T09:00:00.000Z", {
+          toOperatorId: "operator-unknown"
+        })
+      ], [])
+    });
+    const service = new ReportService(repository, {
+      identityRepository: {
+        findTenantUsers: async (tenantId) => [
+          tenantUser("operator-a", "Анна Соколова", tenantId),
+          tenantUser("operator-foreign", "Не из этого tenant", "tenant-ladoga")
+        ]
+      },
+      now: () => NOW
+    });
+
+    const envelope = await service.fetchRoutingActivityReport({ period: "today" }, { tenantId: "tenant-volga" });
+    const rows = envelope.data.rows as Array<{ operatorId: string; operatorName?: string }>;
+
+    assert.equal(rows.find((row) => row.operatorId === "operator-a")?.operatorName, "Анна Соколова");
+    assert.equal(rows.find((row) => row.operatorId === "operator-unknown")?.operatorName, undefined);
   });
 
   it("applies a tenant-scoped custom date window with the request timezone", async () => {
@@ -397,6 +426,25 @@ function prismaClientWithRoutingRows(
       throw new Error("not_used");
     }
   } as unknown as PrismaReportClient;
+}
+
+function tenantUser(id: string, name: string, tenantId: string): IdentityTenantUser {
+  return {
+    device: "desktop",
+    email: id + "@example.test",
+    id,
+    inviteStatus: "accepted",
+    lastActiveAt: null,
+    metadata: {},
+    mfa: "disabled",
+    name,
+    risk: "low",
+    role: "employee",
+    sessions: 1,
+    status: "active",
+    supportNotes: "",
+    tenantId
+  };
 }
 
 function prismaClientWithRoutingConversationDimensions(calls: {

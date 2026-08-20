@@ -1,6 +1,7 @@
 import React from "react";
-import { Activity, Clock3, Info, MessageSquare, ShieldCheck } from "lucide-react";
+import { Activity, Clock3, MessageSquare, ShieldCheck } from "lucide-react";
 import { formatCompactNumber, formatReportMetric, metricLabel } from "../model/reportMetricRegistry.js";
+import { ReportInfoTooltip } from "./ReportInfoTooltip.jsx";
 
 const DIAGNOSTIC_GROUPS = [
   {
@@ -60,16 +61,7 @@ export function OperationalDiagnostics({ definitions, metrics }) {
                     <div className={`reports-diagnostic-metric ${unavailable ? "is-unavailable" : ""}`} data-metric-key={key} key={key}>
                       <dt>
                         <span>{metricLabel(metric, key)}</span>
-                        {definition ? (
-                          <span
-                            aria-label={`Определение: ${metricLabel(metric, key)}`}
-                            className="reports-diagnostic-definition"
-                            role="img"
-                            title={`${definition.formula ?? ""}${definition.source ? ` · Источник: ${formatSource(definition.source)}` : ""}`}
-                          >
-                            <Info aria-hidden="true" size={13} />
-                          </span>
-                        ) : null}
+                        {definition ? <ReportInfoTooltip caveats={definition.caveats} className="reports-diagnostic-definition" description={definition.formula} sources={definition.source} title={metricLabel(metric, key)} /> : null}
                       </dt>
                       <dd>
                         <strong>{formatReportMetric(metric, key)}</strong>
@@ -122,8 +114,4 @@ function diagnosticEvidence(key, metric, metrics) {
 function finite(value) {
   if (value === null || value === undefined || value === "") return null;
   return Number.isFinite(Number(value)) ? Number(value) : null;
-}
-
-function formatSource(source) {
-  return Array.isArray(source) ? source.join(", ") : String(source);
 }
